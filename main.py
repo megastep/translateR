@@ -13,16 +13,18 @@ Repository: https://github.com/emreertunc/translater
 import sys
 import os
 import time
-from typing import Optional, Dict, Any, List
+import re
+from typing import List
+from pathlib import Path
 
 from config import ConfigManager
 from app_store_client import AppStoreConnectClient
 from ai_providers import AIProviderManager, AnthropicProvider, OpenAIProvider, GoogleGeminiProvider
 from utils import (
-    APP_STORE_LOCALES, FIELD_LIMITS, 
+    APP_STORE_LOCALES,
     detect_base_language, truncate_keywords, get_field_limit,
     print_success, print_error, print_warning, print_info, format_progress,
-    export_existing_localizations
+    export_existing_localizations, resolve_private_key_path, DEFAULT_APPSTORE_P8_DIR
 )
 
 
@@ -73,8 +75,12 @@ class TranslateRCLI:
             return self.setup_wizard()
         
         try:
-            # Read private key file
-            with open(asc_config["private_key_path"], "r") as f:
+            # Resolve and read private key file (supports ~/.appstoreconnect/private_keys)
+            resolved_key_path = resolve_private_key_path(
+                key_id=asc_config["key_id"],
+                configured_path=asc_config.get("private_key_path")
+            )
+            with open(resolved_key_path, "r") as f:
                 private_key = f.read()
             
             self.asc_client = AppStoreConnectClient(
@@ -105,13 +111,74 @@ class TranslateRCLI:
         print("3. Download the .p8 private key file")
         print()
         
-        key_id = input("Enter your API Key ID: ").strip()
+        # Discover existing keys in default directory
+        keys_dir = DEFAULT_APPSTORE_P8_DIR
+        existing_keys: List[Path] = []
+        try:
+            if keys_dir.exists():
+                existing_keys = sorted(keys_dir.glob("*.p8"))
+        except Exception:
+            existing_keys = []
+
+        selected_path: str = ""
+        if existing_keys:
+            print()
+            print(f"Found {len(existing_keys)} key(s) in {keys_dir}:")
+            for idx, p in enumerate(existing_keys, 1):
+                print(f"  {idx}. {p.name}")
+            print("  0. Enter a custom path")
+
+            choice = input("Select a key (1-{}), 0 for custom, or Enter to skip: ".format(len(existing_keys))).strip()
+            if choice.isdigit():
+                n = int(choice)
+                if 1 <= n <= len(existing_keys):
+                    selected_path = str(existing_keys[n - 1])
+                elif n == 0:
+                    # Will prompt for custom below
+                    pass
+            elif choice:
+                print_warning("Invalid selection; continuing with custom/default option.")
+
+        # If no selection yet, allow manual entry with generic default hint
+        default_hint = DEFAULT_APPSTORE_P8_DIR
+        if not selected_path:
+            entered = input(
+                f"Enter path to your .p8 private key file (leave blank to use default in {default_hint}): "
+            ).strip()
+            selected_path = entered  # may be blank; resolver will handle
+
+        # Try to guess Key ID from selected filename
+        key_id_guess = None
+        if selected_path:
+            try:
+                name = Path(os.path.expanduser(selected_path)).name
+                m = re.match(r"AuthKey_([A-Za-z0-9]+)\.p8$", name)
+                if m:
+                    key_id_guess = m.group(1)
+            except Exception:
+                key_id_guess = None
+
+        # Determine API Key ID (auto-detect from filename when possible)
+        if key_id_guess:
+            print_info(f"Detected API Key ID: {key_id_guess}")
+            key_id = key_id_guess
+        else:
+            key_id = input("Enter your API Key ID: ").strip()
+        if not key_id:
+            print_error("API Key ID is required")
+            return False
+
+        # Prompt for Issuer ID
         issuer_id = input("Enter your Issuer ID: ").strip()
-        private_key_path = input("Enter path to your .p8 private key file (e.g., AuthKey_ABC123.p8 if in project directory): ").strip()
-        
-        # Validate private key file
-        if not os.path.exists(private_key_path):
-            print_error(f"Private key file not found: {private_key_path}")
+        if not issuer_id:
+            print_error("Issuer ID is required")
+            return False
+
+        # Validate resolved key path (blank allowed if default exists)
+        try:
+            _ = resolve_private_key_path(key_id=key_id, configured_path=selected_path or None)
+        except Exception as e:
+            print_error(str(e))
             return False
         
         # Save App Store Connect config
@@ -119,7 +186,7 @@ class TranslateRCLI:
         api_keys["app_store_connect"] = {
             "key_id": key_id,
             "issuer_id": issuer_id,
-            "private_key_path": private_key_path
+            "private_key_path": selected_path  # may be blank; resolved at runtime
         }
         
         print()

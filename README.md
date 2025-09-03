@@ -7,6 +7,7 @@
    ██    ██   ██ ██   ██ ██  ████       ██ ██      ██   ██    ██    ██      ██   ██ 
    ██    ██   ██ ██   ██ ██   ███  ███████ ███████ ██   ██    ██    ███████ ██   ██ 
 ```
+
 <div align="center">
 
 **🌍 AI-Powered App Store Connect Localization Tool**
@@ -25,6 +26,7 @@ TranslateR connects to your App Store Connect account and automatically translat
 ## Quick Start
 
 1. **Install**
+
    ```bash
    git clone https://github.com/emreertunc/translater.git
    cd translater
@@ -32,34 +34,49 @@ TranslateR connects to your App Store Connect account and automatically translat
    ```
 
 2. **Setup** (one-time)
+
    ```bash
    python3 main.py
    ```
+
    - Add your App Store Connect API key (.p8 file)
    - Add at least one AI provider API key (Claude/GPT/Gemini)
 
 3. **Use**
+
    ```bash
    python3 main.py
    ```
+
    Choose your workflow and follow prompts.
 
 ## What You Need
 
 ### App Store Connect API Key
+
 1. Go to App Store Connect > Users and Access > Integrations
 2. Create API key with **App Manager** role
-3. Download the `.p8` file and place it in your project directory
+3. Download the `.p8` file and place it under `~/.appstoreconnect/private_keys/` (recommended). The tool will also accept a custom path.
 4. Note your Key ID and Issuer ID
 
 ### AI Provider (pick one or more)
+
 - **Claude**: [Get key](https://console.anthropic.com/) - Best translation quality (recommended)
 - **GPT**: [Get key](https://platform.openai.com/) - Most reliable
 - **Gemini**: [Get key](https://makersuite.google.com/) - Fastest
 
+### Environment Variables (optional)
+
+You can provide AI provider keys via environment variables; these override values saved in `config/api_keys.json`:
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GOOGLE_API_KEY` or `GEMINI_API_KEY` or `GOOGLE_GEMINI_API_KEY`
+
 ## 6 Main Workflows
 
 ### 1. 🌐 Translation Mode
+
 **Use when**: Adding new languages to your app
 
 - Detects your base language (usually English)
@@ -68,6 +85,7 @@ TranslateR connects to your App Store Connect account and automatically translat
 - Creates new localizations
 
 ### 2. 🔄 Update Mode
+
 **Use when**: Updating existing translations (e.g., new "What's New" content)
 
 - Updates specific fields in existing languages
@@ -75,6 +93,7 @@ TranslateR connects to your App Store Connect account and automatically translat
 - Perfect for version updates
 
 ### 3. 📋 Copy Mode
+
 **Use when**: New app version with similar content
 
 - Copy content from previous version
@@ -82,6 +101,7 @@ TranslateR connects to your App Store Connect account and automatically translat
 - Fast setup for new versions
 
 ### 4. 🚀 Full Setup Mode  
+
 **Use when**: Complete localization for new apps
 
 - Translate into ALL 38+ supported languages
@@ -89,6 +109,7 @@ TranslateR connects to your App Store Connect account and automatically translat
 - One-command setup
 
 ### 5. 📱 App Name & Subtitle Mode
+
 **Use when**: Translating app name and subtitle
 
 - Separate workflow for branding elements
@@ -96,6 +117,7 @@ TranslateR connects to your App Store Connect account and automatically translat
 - Brand-focused translations
 
 ### 6. 📄 Export Localizations
+
 **Use when**: Backing up or analyzing existing localizations
 
 - Export all existing localizations to timestamped file
@@ -159,6 +181,7 @@ All AI requests and responses are automatically logged for debugging and quality
 **Location**: `logs/ai_requests_YYYYMMDD_HHMMSS.log`
 
 **What's logged**:
+
 - All translation requests with original text and parameters
 - AI responses with translated text and character counts
 - Error details when translations fail
@@ -166,6 +189,7 @@ All AI requests and responses are automatically logged for debugging and quality
 - Timestamps for performance analysis
 
 **Log format example**:
+
 ```
 [2025-08-05 10:30:15] REQUEST
 Provider: Anthropic Claude
@@ -186,6 +210,7 @@ Verwandeln Sie Ihre Ideen in schöne Apps
 ```
 
 **Benefits**:
+
 - **Debug translation issues** - See exactly what was sent and received
 - **Compare AI providers** - Track which providers work best for your content
 - **Quality control** - Review translations before publishing
@@ -237,8 +262,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 **Author**: Emre Ertunç  
-**Contact**: emre@ertunc.com  
-**Repository**: https://github.com/emreertunc/translater
+**Contact**: <emre@ertunc.com>  
+**Repository**: <https://github.com/emreertunc/translater>
 
 ---
 

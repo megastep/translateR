@@ -7,6 +7,7 @@ Common helper functions used throughout the application.
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+from pathlib import Path
 
 
 # App Store supported locales with their language names
@@ -284,3 +285,51 @@ def export_existing_localizations(localizations_data: List[Dict[str, Any]], app_
             f.write("\n")
     
     return filename
+
+
+# Default directory for App Store Connect private keys (p8)
+DEFAULT_APPSTORE_P8_DIR = Path.home() / ".appstoreconnect" / "private_keys"
+
+
+def resolve_private_key_path(key_id: str, configured_path: Optional[str] = None) -> Path:
+    """
+    Resolve the App Store Connect private key (.p8) file path.
+
+    Resolution order:
+    1) If configured_path is provided and exists (after expanding ~), use it.
+    2) If configured_path is provided but not found:
+       - If it's a bare filename, try in DEFAULT_APPSTORE_P8_DIR.
+    3) Fallback to DEFAULT_APPSTORE_P8_DIR / f"AuthKey_{key_id}.p8" if exists.
+
+    Args:
+        key_id: App Store Connect API Key ID (used for default filename)
+        configured_path: Optional path or filename provided via config
+
+    Returns:
+        Path to the resolved private key file
+
+    Raises:
+        FileNotFoundError: If no suitable key file is found
+    """
+    # 1) Respect explicit configured path if it exists
+    if configured_path:
+        # Expand user and make absolute
+        p = Path(os.path.expanduser(configured_path))
+        if p.exists():
+            return p
+
+        # 2) If just a filename, try in default dir
+        if p.name and (not p.parent or str(p).find(os.sep) == -1):
+            candidate = DEFAULT_APPSTORE_P8_DIR / p.name
+            if candidate.exists():
+                return candidate
+
+    # 3) Try the conventional filename in the default directory
+    conventional = DEFAULT_APPSTORE_P8_DIR / f"AuthKey_{key_id}.p8"
+    if conventional.exists():
+        return conventional
+
+    # Nothing found
+    raise FileNotFoundError(
+        f"Could not locate .p8 key. Tried configured path '{configured_path}' and '{conventional}'."
+    )

@@ -74,7 +74,7 @@ class ConfigManager:
                     "gpt-4",
                     "gpt-3.5-turbo"
                 ],
-                "default_model": "gpt-4.1"
+                "default_model": "gpt-5"
             },
             "google": {
                 "name": "Google Gemini",
@@ -186,11 +186,26 @@ CRITICAL: If you cannot stay within character limits while preserving meaning, p
         api_keys = self.load_api_keys()
         asc_config = api_keys.get("app_store_connect", {})
         
-        if all(asc_config.values()):
+        # Require key_id and issuer_id; private_key_path can be resolved via default directory
+        key_id = asc_config.get("key_id")
+        issuer_id = asc_config.get("issuer_id")
+        if key_id and issuer_id:
             return asc_config
         return None
     
     def get_ai_provider_key(self, provider: str) -> Optional[str]:
         """Get API key for specific AI provider."""
+        # Environment variables take precedence over saved config
+        env_names = {
+            "openai": ["OPENAI_API_KEY"],
+            "anthropic": ["ANTHROPIC_API_KEY"],
+            "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GEMINI_API_KEY"],
+        }
+        for var in env_names.get(provider, []):
+            val = os.environ.get(var)
+            if val:
+                return val.strip()
+
+        # Fallback to config file
         api_keys = self.load_api_keys()
         return api_keys.get("ai_providers", {}).get(provider)
