@@ -14,7 +14,7 @@ import sys
 import os
 import time
 import re
-from typing import List
+from typing import List, Optional, Any, Dict
 from pathlib import Path
 
 from config import ConfigManager
@@ -220,22 +220,256 @@ class TranslateRCLI:
         # Reinitialize clients
         self.setup_ai_providers()
         return self.setup_app_store_client()
+
+    def prompt_app_id(self) -> Optional[str]:
+        """List available apps and let the user pick one or paste an ID.
+
+        Uses a modern prompt_toolkit-based UI when available, with
+        fuzzy search and arrow-key navigation. Falls back to a simple
+        text pager with n/p/q if unavailable.
+        """
+        # Try modern TUI first
+        app_id = self._prompt_app_id_tui()
+        if app_id is not None:
+            # Clear last TUI reason on success
+            if hasattr(self, "_last_tui_reason"):
+                self._last_tui_reason = None
+            return app_id
+        else:
+            # If user explicitly backed out/cancelled, don't fallback to pager
+            if getattr(self, "_last_tui_reason", None) == "cancelled":
+                return None
+            # Let user know we're in fallback mode so arrow keys won't work here
+            reason = []
+            if os.environ.get("TRANSLATER_NO_TUI"):
+                reason.append("disabled by TRANSLATER_NO_TUI")
+            try:
+                from InquirerPy import inquirer  # noqa: F401
+            except Exception:
+                reason.append("InquirerPy not installed or unavailable")
+            if not sys.stdin.isatty() or not sys.stdout.isatty():
+                reason.append("non-interactive terminal")
+            # Include last TUI failure reason if available
+            last = getattr(self, "_last_tui_reason", None)
+            if last:
+                reason.append(last)
+            if reason:
+                print_info("Interactive picker unavailable (" + ", ".join(reason) + ") — using basic pager (n/p/q).")
+            else:
+                print_info("Interactive picker unavailable — using basic pager (n/p/q).")
+
+        # Fallback to text-based prompt with paging
+        page_size = 25
+        pages: List[Dict[str, Any]] = []  # each: {items: List[tuple], next_cursor: str|None}
+        page_index = 0
+        cursor: Optional[str] = None
+
+        try:
+            while True:
+                # Load page if needed
+                if page_index >= len(pages):
+                    resp = self.asc_client.get_apps_page(limit=page_size, cursor=cursor)
+                    data = resp.get("data", [])
+                    next_cursor = resp.get("next_cursor")
+                    # Transform to display items
+                    items = []
+                    for app in data:
+                        attrs = app.get("attributes", {})
+                        name = attrs.get("name", "<unknown>")
+                        bundle_id = attrs.get("bundleId", "")
+                        items.append((app.get("id"), name, bundle_id))
+                    pages.append({"items": items, "next_cursor": next_cursor})
+
+                    # If first page and empty, fallback to manual input
+                    if page_index == 0 and not items:
+                        print_warning("No apps found in your App Store Connect account")
+                        app_id = input("Enter your App ID: ").strip()
+                        return app_id or None
+
+                # Show current page
+                current = pages[page_index]
+                items = current["items"]
+                total_on_page = len(items)
+
+                print()
+                print(f"Your Apps (page {page_index + 1}):")
+                for i, (_id, name, bundle_id) in enumerate(items, 1):
+                    label = f"{i:2d}. {name}"
+                    if bundle_id:
+                        label += f"  [{bundle_id}]"
+                    print(label)
+                print()
+
+                # Build prompt with navigation options
+                options = []
+                if current.get("next_cursor"):
+                    options.append("n=next")
+                if page_index > 0:
+                    options.append("p=prev")
+                options.append("q=cancel")
+                nav = " | ".join(options)
+                prompt = f"Select app (1-{total_on_page}), paste App ID, or {nav}: "
+
+                sel = input(prompt).strip()
+                if not sel:
+                    print_warning("Please select a number, navigate, or paste an App ID.")
+                    continue
+
+                # Navigation
+                if sel.lower() == 'n' and current.get("next_cursor"):
+                    cursor = current["next_cursor"]
+                    page_index += 1
+                    continue
+                if sel.lower() == 'p' and page_index > 0:
+                    page_index -= 1
+                    continue
+                if sel.lower() == 'q':
+                    return None
+
+                # Numeric selection
+                if sel.isdigit():
+                    n = int(sel)
+                    if 1 <= n <= total_on_page:
+                        return items[n - 1][0]
+                    print_error("Invalid selection number.")
+                    continue
+
+                # Assume pasted App ID
+                return sel
+        except Exception as e:
+            print_warning(f"Could not fetch apps list: {e}")
+            app_id = input("Enter your App ID: ").strip()
+            return app_id or None
+
+    def _prompt_app_id_tui(self) -> Optional[str]:
+        """Modern TUI app selector using InquirerPy (fuzzy search). Returns None on fallback/cancel."""
+        # Allow opt-out via env and require TTY
+        if os.environ.get("TRANSLATER_NO_TUI"):
+            self._last_tui_reason = "disabled by TRANSLATER_NO_TUI"
+            return None
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            self._last_tui_reason = "non-interactive terminal"
+            return None
+        try:
+            from InquirerPy import inquirer
+        except Exception:
+            self._last_tui_reason = "InquirerPy import failed"
+            return None
+
+        # Fetch up to 200 apps for selection (fast and sufficient for most accounts)
+        try:
+            response = self.asc_client.get_apps(limit=200)
+            apps = response.get("data", [])
+        except Exception as e:
+            self._last_tui_reason = f"failed to fetch apps list: {e}"
+            return None
+
+        if not apps:
+            self._last_tui_reason = "no apps found"
+            return None
+
+        choices: List[dict] = [
+            {"name": "← Back", "value": "__back__"},
+            {"name": "Paste App ID manually...", "value": "__manual__"},
+        ]
+        for app in apps:
+            attrs = app.get("attributes", {})
+            name = attrs.get("name", "<unknown>")
+            bundle_id = attrs.get("bundleId", "")
+            label = name if not bundle_id else f"{name}  [{bundle_id}]"
+            choices.append({"name": label, "value": app.get("id")})
+
+        try:
+            # Keep args minimal for broad compatibility across InquirerPy versions
+            result = inquirer.fuzzy(
+                message="Select app (type to filter)",
+                choices=choices,
+            ).execute()
+        except Exception as e:
+            self._last_tui_reason = f"interactive prompt failed: {e}"
+            return None
+
+        if result == "__back__":
+            self._last_tui_reason = "cancelled"
+            return None
+        if result == "__manual__":
+            app_id = input("Enter your App ID: ").strip()
+            return app_id or None
+        return result
+
+    def _tui_available(self) -> bool:
+        if os.environ.get("TRANSLATER_NO_TUI"):
+            return False
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            return False
+        try:
+            from InquirerPy import inquirer  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    def _tui_select(self, message: str, choices: List[dict], add_back: bool = False) -> Optional[str]:
+        try:
+            from InquirerPy import inquirer
+        except Exception:
+            return None
+        try:
+            if add_back:
+                choices = ([{"name": "← Back", "value": "__back__"}] + list(choices))
+            result = inquirer.select(message=message, choices=choices).execute()
+            if result == "__back__":
+                return None
+            return result
+        except Exception:
+            return None
+
+    def _tui_checkbox(self, message: str, choices: List[dict], add_back: bool = False) -> Optional[List[str]]:
+        try:
+            from InquirerPy import inquirer
+        except Exception:
+            return None
+        try:
+            if add_back:
+                choices = ([{"name": "← Back", "value": "__back__"}] + list(choices))
+            result = inquirer.checkbox(message=message, choices=choices).execute()
+            # If user selected Back alone, treat as cancel
+            if isinstance(result, list) and "__back__" in result and len(result) == 1:
+                return None
+            # Filter out back sentinel if mixed
+            if isinstance(result, list):
+                result = [v for v in result if v != "__back__"]
+            return result
+        except Exception:
+            return None
     
     def show_main_menu(self):
         """Display main menu and handle user choice."""
-        print()
-        print("🌍 TranslateR - Choose your workflow:")
-        print("1. 🌐 Translation Mode - Translate to new languages")
-        print("2. 🔄 Update Mode - Update existing localizations")
-        print("3. 📋 Copy Mode - Copy from previous version") 
-        print("4. 🚀 Full Setup Mode - Complete localization setup")
-        print("5. 📱 App Name & Subtitle Mode - Translate app name and subtitle")
-        print("6. 📄 Export Localizations - Export existing localizations to file")
-        print("7. ⚙️  Configuration - Manage API keys and settings")
-        print("8. ❌ Exit")
-        print()
-        
-        choice = input("Select an option (1-8): ").strip()
+        # TUI-based main menu when available
+        if self._tui_available():
+            choices = [
+                {"name": "1. 🌐 Translation Mode - Translate to new languages", "value": "1"},
+                {"name": "2. 🔄 Update Mode - Update existing localizations", "value": "2"},
+                {"name": "3. 📋 Copy Mode - Copy from previous version", "value": "3"},
+                {"name": "4. 🚀 Full Setup Mode - Complete localization setup", "value": "4"},
+                {"name": "5. 📱 App Name & Subtitle Mode - Translate app name and subtitle", "value": "5"},
+                {"name": "6. 📄 Export Localizations - Export existing localizations to file", "value": "6"},
+                {"name": "7. ⚙️  Configuration - Manage API keys and settings", "value": "7"},
+                {"name": "8. ❌ Exit", "value": "8"},
+            ]
+            choice = self._tui_select("TranslateR — Choose your workflow", choices) or ""
+        else:
+            print()
+            print("🌍 TranslateR - Choose your workflow:")
+            print("1. 🌐 Translation Mode - Translate to new languages")
+            print("2. 🔄 Update Mode - Update existing localizations")
+            print("3. 📋 Copy Mode - Copy from previous version") 
+            print("4. 🚀 Full Setup Mode - Complete localization setup")
+            print("5. 📱 App Name & Subtitle Mode - Translate app name and subtitle")
+            print("6. 📄 Export Localizations - Export existing localizations to file")
+            print("7. ⚙️  Configuration - Manage API keys and settings")
+            print("8. ❌ Exit")
+            print()
+            choice = input("Select an option (1-8): ").strip()
         
         if choice == "1":
             return self.translation_mode()
@@ -264,33 +498,49 @@ class TranslateRCLI:
         print()
         
         # Ask user what to translate
-        print("Translation Options:")
-        print("1. Metadata Only (description, keywords, promotional text, what's new)")
-        print("2. Complete Translation (metadata + app name & subtitle)")
-        print()
-        
-        translation_choice = input("Select translation type (1-2): ").strip()
-        
-        if translation_choice not in ['1', '2']:
-            print_error("Invalid selection. Please choose 1 or 2.")
-            return True
-            
+        if self._tui_available():
+            choice = self._tui_select(
+                "Select translation type",
+                [
+                    {"name": "Metadata Only (description, keywords, promotional text, what's new)", "value": "1"},
+                    {"name": "Complete Translation (metadata + app name & subtitle)", "value": "2"},
+                ],
+                add_back=True,
+            )
+            if choice is None:
+                print_info("Cancelled")
+                return True
+            translation_choice = choice or "1"
+        else:
+            print("Translation Options:")
+            print("1. Metadata Only (description, keywords, promotional text, what's new)")
+            print("2. Complete Translation (metadata + app name & subtitle)")
+            print("(press 'b' to go back)")
+            print()
+            translation_choice = input("Select translation type (1-2): ").strip().lower()
+            if translation_choice == 'b':
+                print_info("Cancelled")
+                return True
+            if translation_choice not in ['1', '2']:
+                print_error("Invalid selection. Please choose 1 or 2.")
+                return True
         include_app_info = translation_choice == '2'
         
         try:
-            # Get app ID from user
-            app_id = input("Enter your App ID: ").strip()
-            if not app_id:
-                print_error("App ID is required")
+            # Pick app from list or paste an ID
+            app_id = self.prompt_app_id()
+            if app_id is None:
+                print_info("Cancelled")
                 return True
             
-            # Get latest app store version
-            version_id = self.asc_client.get_latest_app_store_version(app_id)
-            if not version_id:
+            # Get latest app store version (use version string for display)
+            version_info = self.asc_client.get_latest_app_store_version_info(app_id)
+            if not version_info:
                 print_error("No App Store version found for this app")
                 return True
-            
-            print_success(f"Found latest version: {version_id}")
+            version_id = version_info["id"]
+            version_string = version_info.get("versionString") or version_id
+            print_success(f"Found latest version: {version_string}")
             
             # Get existing localizations
             localizations_response = self.asc_client.get_app_store_version_localizations(version_id)
@@ -330,29 +580,36 @@ class TranslateRCLI:
                 print_warning("All supported languages are already localized")
                 return True
             
-            # Display available languages in chunks
+            # Select target languages (checkbox TUI if available)
             languages_list = list(available_targets.items())
-            for i, (locale, name) in enumerate(languages_list[:20], 1):  # Show first 20
-                print(f"{i:2d}. {locale:8} - {name}")
-            
-            if len(languages_list) > 20:
-                print(f"... and {len(languages_list) - 20} more languages")
-            
-            print()
-            print("Enter target language locales (comma-separated, e.g., 'de-DE,fr-FR,es-ES'):")
-            target_input = input("Target languages: ").strip()
-            
-            if not target_input:
-                print_warning("No target languages selected")
-                return True
-            
-            # Parse target languages
-            target_locales = [locale.strip() for locale in target_input.split(",")]
-            invalid_locales = [loc for loc in target_locales if loc not in available_targets]
-            
-            if invalid_locales:
-                print_error(f"Invalid language codes: {', '.join(invalid_locales)}")
-                return True
+            if self._tui_available():
+                choices = [{"name": f"{loc} - {nm}", "value": loc} for (loc, nm) in languages_list]
+                selected = self._tui_checkbox(
+                    "Select target languages (Space to toggle, Enter to confirm)", choices, add_back=True
+                )
+                if not selected:
+                    print_warning("No target languages selected")
+                    return True
+                target_locales = selected
+            else:
+                for i, (locale, name) in enumerate(languages_list[:20], 1):  # Show first 20
+                    print(f"{i:2d}. {locale:8} - {name}")
+                if len(languages_list) > 20:
+                    print(f"... and {len(languages_list) - 20} more languages")
+                print()
+                print("Enter target language locales (comma-separated, e.g., 'de-DE,fr-FR,es-ES') or 'b' to go back:")
+                target_input = input("Target languages: ").strip()
+                if not target_input:
+                    print_warning("No target languages selected")
+                    return True
+                if target_input.lower() == 'b':
+                    print_info("Cancelled")
+                    return True
+                target_locales = [locale.strip() for locale in target_input.split(",")]
+                invalid_locales = [loc for loc in target_locales if loc not in available_targets]
+                if invalid_locales:
+                    print_error(f"Invalid language codes: {', '.join(invalid_locales)}")
+                    return True
             
             # Select AI provider
             providers = self.ai_manager.list_providers()
@@ -360,21 +617,29 @@ class TranslateRCLI:
                 selected_provider = providers[0]
                 print_info(f"Using AI provider: {selected_provider}")
             else:
-                print()
-                print("Available AI providers:")
-                for i, provider in enumerate(providers, 1):
-                    print(f"{i}. {provider}")
-                
-                while True:
-                    try:
-                        choice = int(input("Select AI provider (number): ").strip())
-                        if 1 <= choice <= len(providers):
-                            selected_provider = providers[choice - 1]
-                            break
-                        else:
-                            print_error("Invalid choice")
-                    except ValueError:
-                        print_error("Please enter a number")
+                selected_provider = None
+                if self._tui_available():
+                    choices = [{"name": p, "value": p} for p in providers]
+                    selected_provider = self._tui_select("Select AI provider", choices, add_back=True)
+                if not selected_provider:
+                    print()
+                    print("Available AI providers:")
+                    for i, provider in enumerate(providers, 1):
+                        print(f"{i}. {provider}")
+                    while True:
+                        raw = input("Select AI provider (number, or 'b' to go back): ").strip().lower()
+                        if raw == 'b':
+                            print_info("Cancelled")
+                            return True
+                        try:
+                            choice = int(raw)
+                            if 1 <= choice <= len(providers):
+                                selected_provider = providers[choice - 1]
+                                break
+                            else:
+                                print_error("Invalid choice")
+                        except ValueError:
+                            print_error("Please enter a number")
             
             provider = self.ai_manager.get_provider(selected_provider)
             
@@ -590,18 +855,19 @@ class TranslateRCLI:
         
         try:
             # Get app ID from user
-            app_id = input("Enter your App ID: ").strip()
-            if not app_id:
-                print_error("App ID is required")
+            app_id = self.prompt_app_id()
+            if app_id is None:
+                print_info("Cancelled")
                 return True
             
-            # Get latest app store version
-            version_id = self.asc_client.get_latest_app_store_version(app_id)
-            if not version_id:
+            # Get latest app store version (use version string for display)
+            version_info = self.asc_client.get_latest_app_store_version_info(app_id)
+            if not version_info:
                 print_error("No App Store version found for this app")
                 return True
-            
-            print_success(f"Found latest version: {version_id}")
+            version_id = version_info["id"]
+            version_string = version_info.get("versionString") or version_id
+            print_success(f"Found latest version: {version_string}")
             
             # Get existing localizations
             localizations_response = self.asc_client.get_app_store_version_localizations(version_id)
@@ -637,44 +903,50 @@ class TranslateRCLI:
                 print_warning("No other localizations found to update. Use Translation Mode to add new languages.")
                 return True
             
-            print()
-            print("Existing localizations to update:")
-            for i, locale in enumerate(existing_locales, 1):
-                language_name = APP_STORE_LOCALES.get(locale, "Unknown")
-                print(f"{i:2d}. {locale} ({language_name})")
-            
-            # Let user select which languages to update
-            print()
-            print("Select languages to update:")
-            print("• Enter 'all' to update all languages")
-            print("• Enter numbers (comma-separated, e.g., '1,3,5')")
-            print("• Enter locale codes (comma-separated, e.g., 'zh-Hans,de-DE')")
-            
-            target_input = input("Languages to update: ").strip()
-            
-            if not target_input:
-                print_warning("No languages selected")
-                return True
-            
-            # Parse target languages
-            if target_input.lower() == 'all':
-                target_locales = existing_locales
-            elif target_input.replace(',', '').replace(' ', '').isdigit():
-                # Numbers selected
-                try:
-                    indices = [int(x.strip()) for x in target_input.split(',')]
-                    target_locales = [existing_locales[i-1] for i in indices if 1 <= i <= len(existing_locales)]
-                except (ValueError, IndexError):
-                    print_error("Invalid numbers. Please use 1-based indexing.")
+            # Select languages to update (TUI if available)
+            if self._tui_available():
+                choices = [{"name": f"{loc} ({APP_STORE_LOCALES.get(loc, 'Unknown')})", "value": loc} for loc in existing_locales]
+                selected = self._tui_checkbox(
+                    "Select languages to update (Space to toggle, Enter to confirm)", choices, add_back=True
+                )
+                if not selected:
+                    print_warning("No languages selected")
                     return True
+                target_locales = selected
             else:
-                # Locale codes
-                target_locales = [locale.strip() for locale in target_input.split(",")]
-                invalid_locales = [loc for loc in target_locales if loc not in existing_locales]
-                
-                if invalid_locales:
-                    print_error(f"Invalid or non-existing language codes: {', '.join(invalid_locales)}")
+                print()
+                print("Existing localizations to update:")
+                for i, locale in enumerate(existing_locales, 1):
+                    language_name = APP_STORE_LOCALES.get(locale, "Unknown")
+                    print(f"{i:2d}. {locale} ({language_name})")
+                print()
+                print("Select languages to update:")
+                print("• Enter 'all' to update all languages")
+                print("• Enter numbers (comma-separated, e.g., '1,3,5')")
+                print("• Enter locale codes (comma-separated, e.g., 'zh-Hans,de-DE')")
+                print("(or 'b' to go back)")
+                target_input = input("Languages to update: ").strip()
+                if not target_input:
+                    print_warning("No languages selected")
                     return True
+                if target_input.lower() == 'b':
+                    print_info("Cancelled")
+                    return True
+                if target_input.lower() == 'all':
+                    target_locales = existing_locales
+                elif target_input.replace(',', '').replace(' ', '').isdigit():
+                    try:
+                        indices = [int(x.strip()) for x in target_input.split(',')]
+                        target_locales = [existing_locales[i-1] for i in indices if 1 <= i <= len(existing_locales)]
+                    except (ValueError, IndexError):
+                        print_error("Invalid numbers. Please use 1-based indexing.")
+                        return True
+                else:
+                    target_locales = [locale.strip() for locale in target_input.split(",")]
+                    invalid_locales = [loc for loc in target_locales if loc not in existing_locales]
+                    if invalid_locales:
+                        print_error(f"Invalid or non-existing language codes: {', '.join(invalid_locales)}")
+                        return True
             
             if not target_locales:
                 print_warning("No valid languages selected")
@@ -701,28 +973,43 @@ class TranslateRCLI:
                 print_error("No content found in base language to translate")
                 return True
             
-            # Let user select which fields to update
-            print()
-            print("Select fields to update:")
-            print("• Enter 'all' to update all available fields")
-            print("• Enter field names (comma-separated, e.g., 'whats_new,promotional_text')")
-            
-            fields_input = input("Fields to update: ").strip()
-            
-            if not fields_input:
-                print_warning("No fields selected")
-                return True
-            
-            if fields_input.lower() == 'all':
-                selected_fields = available_fields
-            else:
-                selected_fields = [field.strip() for field in fields_input.split(",")]
-                invalid_fields = [field for field in selected_fields if field not in available_fields]
-                
-                if invalid_fields:
-                    print_error(f"Invalid field names: {', '.join(invalid_fields)}")
-                    print(f"Available fields: {', '.join(available_fields)}")
+            # Select fields to update (TUI if available)
+            if self._tui_available():
+                field_name_map = {
+                    "description": "Description",
+                    "keywords": "Keywords",
+                    "promotional_text": "Promotional Text",
+                    "whats_new": "What's New",
+                }
+                choices = [{"name": field_name_map[f], "value": f} for f in available_fields]
+                selected_fields = self._tui_checkbox(
+                    "Select fields to update (Space to toggle, Enter to confirm)", choices, add_back=True
+                )
+                if not selected_fields:
+                    print_warning("No fields selected")
                     return True
+            else:
+                print()
+                print("Select fields to update:")
+                print("• Enter 'all' to update all available fields")
+                print("• Enter field names (comma-separated, e.g., 'whats_new,promotional_text')")
+                print("(or 'b' to go back)")
+                fields_input = input("Fields to update: ").strip()
+                if not fields_input:
+                    print_warning("No fields selected")
+                    return True
+                if fields_input.lower() == 'b':
+                    print_info("Cancelled")
+                    return True
+                if fields_input.lower() == 'all':
+                    selected_fields = available_fields
+                else:
+                    selected_fields = [field.strip() for field in fields_input.split(",")]
+                    invalid_fields = [field for field in selected_fields if field not in available_fields]
+                    if invalid_fields:
+                        print_error(f"Invalid field names: {', '.join(invalid_fields)}")
+                        print(f"Available fields: {', '.join(available_fields)}")
+                        return True
             
             # Select AI provider
             providers = self.ai_manager.list_providers()
@@ -730,21 +1017,25 @@ class TranslateRCLI:
                 selected_provider = providers[0]
                 print_info(f"Using AI provider: {selected_provider}")
             else:
-                print()
-                print("Available AI providers:")
-                for i, provider in enumerate(providers, 1):
-                    print(f"{i}. {provider}")
-                
-                while True:
-                    try:
-                        choice = int(input("Select AI provider (number): ").strip())
-                        if 1 <= choice <= len(providers):
-                            selected_provider = providers[choice - 1]
-                            break
-                        else:
-                            print_error("Invalid choice")
-                    except ValueError:
-                        print_error("Please enter a number")
+                selected_provider = None
+                if self._tui_available():
+                    choices = [{"name": p, "value": p} for p in providers]
+                    selected_provider = self._tui_select("Select AI provider", choices, add_back=True)
+                if not selected_provider:
+                    print()
+                    print("Available AI providers:")
+                    for i, provider in enumerate(providers, 1):
+                        print(f"{i}. {provider}")
+                    while True:
+                        try:
+                            choice = int(input("Select AI provider (number): ").strip())
+                            if 1 <= choice <= len(providers):
+                                selected_provider = providers[choice - 1]
+                                break
+                            else:
+                                print_error("Invalid choice")
+                        except ValueError:
+                            print_error("Please enter a number")
             
             provider = self.ai_manager.get_provider(selected_provider)
             
@@ -864,9 +1155,9 @@ class TranslateRCLI:
         
         try:
             # Get app ID from user
-            app_id = input("Enter your App ID: ").strip()
-            if not app_id:
-                print_error("App ID is required")
+            app_id = self.prompt_app_id()
+            if app_id is None:
+                print_info("Cancelled")
                 return True
             
             # Get all app store versions
@@ -877,39 +1168,63 @@ class TranslateRCLI:
                 print_error("Need at least 2 versions to copy content between them")
                 return True
             
-            # Show available versions
-            print("Available versions:")
-            for i, version in enumerate(versions[:10], 1):  # Show last 10 versions
-                attrs = version["attributes"]
-                print(f"{i}. Version {attrs.get('versionString', 'Unknown')} - {attrs.get('appStoreState', 'Unknown')}")
-            
-            # Select source version
-            print()
-            while True:
-                try:
-                    source_choice = int(input("Select source version to copy FROM (number): ").strip())
-                    if 1 <= source_choice <= len(versions):
-                        source_version = versions[source_choice - 1]
-                        break
-                    else:
-                        print_error("Invalid choice")
-                except ValueError:
-                    print_error("Please enter a number")
-            
-            # Select target version
-            print()
-            while True:
-                try:
-                    target_choice = int(input("Select target version to copy TO (number): ").strip())
-                    if 1 <= target_choice <= len(versions) and target_choice != source_choice:
-                        target_version = versions[target_choice - 1]
-                        break
-                    elif target_choice == source_choice:
-                        print_error("Source and target versions cannot be the same")
-                    else:
-                        print_error("Invalid choice")
-                except ValueError:
-                    print_error("Please enter a number")
+            # Select source and target versions (TUI if available)
+            if self._tui_available():
+                ver_choices = []
+                for v in versions:
+                    attrs = v.get("attributes", {})
+                    name = f"Version {attrs.get('versionString', 'Unknown')} - {attrs.get('appStoreState', 'Unknown')}"
+                    ver_choices.append({"name": name, "value": v})
+                source_version = self._tui_select("Select source version to copy FROM", ver_choices)
+                if not source_version:
+                    print_error("Selection cancelled")
+                    return True
+                # Remove selected from target choices
+                target_choices = [c for c in ver_choices if c["value"]["id"] != source_version["id"]]
+                target_version = self._tui_select("Select target version to copy TO", target_choices)
+                if not target_version:
+                    print_error("Selection cancelled")
+                    return True
+            else:
+                # Show available versions
+                print("Available versions:")
+                for i, version in enumerate(versions[:10], 1):  # Show last 10 versions
+                    attrs = version["attributes"]
+                    print(f"{i}. Version {attrs.get('versionString', 'Unknown')} - {attrs.get('appStoreState', 'Unknown')}")
+                # Select source version
+                print()
+                while True:
+                    raw = input("Select source version to copy FROM (number, or 'b' to go back): ").strip().lower()
+                    if raw == 'b':
+                        print_info("Cancelled")
+                        return True
+                    try:
+                        source_choice = int(raw)
+                        if 1 <= source_choice <= len(versions):
+                            source_version = versions[source_choice - 1]
+                            break
+                        else:
+                            print_error("Invalid choice")
+                    except ValueError:
+                        print_error("Please enter a number")
+                # Select target version
+                print()
+                while True:
+                    raw = input("Select target version to copy TO (number, or 'b' to go back): ").strip().lower()
+                    if raw == 'b':
+                        print_info("Cancelled")
+                        return True
+                    try:
+                        target_choice = int(raw)
+                        if 1 <= target_choice <= len(versions) and target_choice != source_choice:
+                            target_version = versions[target_choice - 1]
+                            break
+                        elif target_choice == source_choice:
+                            print_error("Source and target versions cannot be the same")
+                        else:
+                            print_error("Invalid choice")
+                    except ValueError:
+                        print_error("Please enter a number")
             
             source_version_id = source_version["id"]
             target_version_id = target_version["id"]
@@ -991,18 +1306,19 @@ class TranslateRCLI:
         
         try:
             # Get app ID from user
-            app_id = input("Enter your App ID: ").strip()
-            if not app_id:
-                print_error("App ID is required")
+            app_id = self.prompt_app_id()
+            if app_id is None:
+                print_info("Cancelled")
                 return True
             
-            # Get latest app store version
-            version_id = self.asc_client.get_latest_app_store_version(app_id)
-            if not version_id:
+            # Get latest app store version (use version string for display)
+            version_info = self.asc_client.get_latest_app_store_version_info(app_id)
+            if not version_info:
                 print_error("No App Store version found for this app")
                 return True
-            
-            print_success(f"Found latest version: {version_id}")
+            version_id = version_info["id"]
+            version_string = version_info.get("versionString") or version_id
+            print_success(f"Found latest version: {version_string}")
             
             # Get existing localizations
             localizations_response = self.asc_client.get_app_store_version_localizations(version_id)
@@ -1036,16 +1352,30 @@ class TranslateRCLI:
             
             # Ask user what they want to do
             print()
-            print("Full Setup Options:")
-            print("1. Add ALL missing languages (translate all)")
-            print("2. Add specific languages (choose which ones)")
-            print("3. Cancel")
-            
-            while True:
-                choice = input("Select option (1-3): ").strip()
-                if choice in ['1', '2', '3']:
-                    break
-                print_error("Invalid choice. Please select 1-3.")
+            # Full setup option selection (TUI if available)
+            if self._tui_available():
+                choice = self._tui_select(
+                    "Full Setup Options",
+                    [
+                        {"name": "Add ALL missing languages (translate all)", "value": '1'},
+                        {"name": "Add specific languages (choose which ones)", "value": '2'},
+                        {"name": "Cancel", "value": '3'},
+                    ],
+                    add_back=True,
+                ) or '3'
+                if choice is None:
+                    print_info("Cancelled")
+                    return True
+            else:
+                print("Full Setup Options:")
+                print("1. Add ALL missing languages (translate all)")
+                print("2. Add specific languages (choose which ones)")
+                print("3. Cancel")
+                while True:
+                    choice = input("Select option (1-3): ").strip()
+                    if choice in ['1', '2', '3']:
+                        break
+                    print_error("Invalid choice. Please select 1-3.")
             
             if choice == '3':
                 print_info("Full setup cancelled")
@@ -1056,30 +1386,39 @@ class TranslateRCLI:
                 target_locales = list(missing_locales)
                 print_info(f"Will add all {len(target_locales)} missing languages")
             else:  # choice == '2'
-                print()
-                print("Missing languages:")
-                missing_list = list(missing_locales)
-                for i, locale in enumerate(missing_list[:20], 1):
-                    language_name = APP_STORE_LOCALES[locale]
-                    print(f"{i:2d}. {locale:8} - {language_name}")
-                
-                if len(missing_list) > 20:
-                    print(f"... and {len(missing_list) - 20} more")
-                
-                print()
-                print("Enter language locales (comma-separated, e.g., 'de-DE,fr-FR,es-ES'):")
-                target_input = input("Target languages: ").strip()
-                
-                if not target_input:
-                    print_warning("No target languages selected")
-                    return True
-                
-                target_locales = [locale.strip() for locale in target_input.split(",")]
-                invalid_locales = [loc for loc in target_locales if loc not in missing_locales]
-                
-                if invalid_locales:
-                    print_error(f"Invalid or already existing language codes: {', '.join(invalid_locales)}")
-                    return True
+                # TUI checkbox for missing languages if available
+                if self._tui_available():
+                    choices = [
+                        {"name": f"{loc} - {APP_STORE_LOCALES[loc]}", "value": loc}
+                        for loc in sorted(missing_locales)
+                    ]
+                    selected = self._tui_checkbox(
+                        "Select missing languages (Space to toggle, Enter to confirm)", choices, add_back=True
+                    )
+                    if not selected:
+                        print_warning("No target languages selected")
+                        return True
+                    target_locales = selected
+                else:
+                    print()
+                    print("Missing languages:")
+                    missing_list = list(missing_locales)
+                    for i, locale in enumerate(missing_list[:20], 1):
+                        language_name = APP_STORE_LOCALES[locale]
+                        print(f"{i:2d}. {locale:8} - {language_name}")
+                    if len(missing_list) > 20:
+                        print(f"... and {len(missing_list) - 20} more")
+                    print()
+                    print("Enter language locales (comma-separated, e.g., 'de-DE,fr-FR,es-ES'):")
+                    target_input = input("Target languages: ").strip()
+                    if not target_input:
+                        print_warning("No target languages selected")
+                        return True
+                    target_locales = [locale.strip() for locale in target_input.split(",")]
+                    invalid_locales = [loc for loc in target_locales if loc not in missing_locales]
+                    if invalid_locales:
+                        print_error(f"Invalid or already existing language codes: {', '.join(invalid_locales)}")
+                        return True
             
             # Get base localization data
             base_data = None
@@ -1104,21 +1443,29 @@ class TranslateRCLI:
                 selected_provider = providers[0]
                 print_info(f"Using AI provider: {selected_provider}")
             else:
-                print()
-                print("Available AI providers:")
-                for i, provider in enumerate(providers, 1):
-                    print(f"{i}. {provider}")
-                
-                while True:
-                    try:
-                        provider_choice = int(input("Select AI provider (number): ").strip())
-                        if 1 <= provider_choice <= len(providers):
-                            selected_provider = providers[provider_choice - 1]
-                            break
-                        else:
-                            print_error("Invalid choice")
-                    except ValueError:
-                        print_error("Please enter a number")
+                selected_provider = None
+                if self._tui_available():
+                    choices = [{"name": p, "value": p} for p in providers]
+                    selected_provider = self._tui_select("Select AI provider", choices, add_back=True)
+                if not selected_provider:
+                    print()
+                    print("Available AI providers:")
+                    for i, provider in enumerate(providers, 1):
+                        print(f"{i}. {provider}")
+                    while True:
+                        raw = input("Select AI provider (number, or 'b' to go back): ").strip().lower()
+                        if raw == 'b':
+                            print_info("Cancelled")
+                            return True
+                        try:
+                            provider_choice = int(raw)
+                            if 1 <= provider_choice <= len(providers):
+                                selected_provider = providers[provider_choice - 1]
+                                break
+                            else:
+                                print_error("Invalid choice")
+                        except ValueError:
+                            print_error("Please enter a number")
             
             provider = self.ai_manager.get_provider(selected_provider)
             
@@ -1338,31 +1685,18 @@ class TranslateRCLI:
         print_info("App Name & Subtitle Mode - Translate app name and subtitle")
         
         try:
-            available_apps = self.asc_client.get_apps()
-            apps = available_apps.get("data", [])
-            
-            if not apps:
-                print_error("No apps found in your App Store Connect account")
+            # Use common app picker
+            app_id = self.prompt_app_id()
+            if not app_id:
+                print_error("App selection cancelled")
                 return True
-            
-            print()
-            print("Available Apps:")
-            for i, app in enumerate(apps, 1):
-                app_name = app.get("attributes", {}).get("name", "Unknown")
-                print(f"{i}. {app_name}")
-            
-            while True:
-                try:
-                    choice = int(input("Select app (number): ").strip())
-                    if 1 <= choice <= len(apps):
-                        selected_app = apps[choice - 1]
-                        app_id = selected_app["id"]
-                        app_name = selected_app.get("attributes", {}).get("name", "Unknown")
-                        break
-                    else:
-                        print_error("Invalid choice")
-                except ValueError:
-                    print_error("Please enter a number")
+            # Get app name for display
+            apps_response = self.asc_client.get_apps(limit=200)
+            app_name = "Unknown"
+            for app in apps_response.get("data", []):
+                if app.get("id") == app_id:
+                    app_name = app.get("attributes", {}).get("name", "Unknown")
+                    break
             
             print_info(f"Selected app: {app_name}")
             
@@ -1404,46 +1738,64 @@ class TranslateRCLI:
                 print(f"📝 Subtitle: {base_subtitle}")
             
             available_targets = [locale for locale in APP_STORE_LOCALES if locale != base_locale]
-            
-            print()
-            print("Available target languages:")
-            print(", ".join([f"{locale} ({APP_STORE_LOCALES[locale]})" for locale in available_targets[:10]]))
-            if len(available_targets) > 10:
-                print(f"... and {len(available_targets) - 10} more")
-            
-            target_input = input("Enter target language locales (comma-separated, e.g., 'de-DE,fr-FR,es-ES'): ").strip()
-            
-            if not target_input:
-                print_warning("No target languages selected")
-                return True
-            
-            target_locales = [locale.strip() for locale in target_input.split(",")]
-            invalid_locales = [loc for loc in target_locales if loc not in available_targets]
-            
-            if invalid_locales:
-                print_error(f"Invalid language codes: {', '.join(invalid_locales)}")
-                return True
+            # TUI checkbox for languages
+            if self._tui_available():
+                choices = [
+                    {"name": f"{loc} ({APP_STORE_LOCALES[loc]})", "value": loc}
+                    for loc in available_targets
+                ]
+                selected = self._tui_checkbox("Select target languages (Space to toggle, Enter to confirm)", choices)
+                if not selected:
+                    print_warning("No target languages selected")
+                    return True
+                target_locales = selected
+            else:
+                print()
+                print("Available target languages:")
+                print(", ".join([f"{locale} ({APP_STORE_LOCALES[locale]})" for locale in available_targets[:10]]))
+                if len(available_targets) > 10:
+                    print(f"... and {len(available_targets) - 10} more")
+                target_input = input("Enter target language locales (comma-separated) or 'b' to go back: ").strip()
+                if not target_input:
+                    print_warning("No target languages selected")
+                    return True
+                if target_input.lower() == 'b':
+                    print_info("Cancelled")
+                    return True
+                target_locales = [locale.strip() for locale in target_input.split(",")]
+                invalid_locales = [loc for loc in target_locales if loc not in available_targets]
+                if invalid_locales:
+                    print_error(f"Invalid language codes: {', '.join(invalid_locales)}")
+                    return True
             
             providers = self.ai_manager.list_providers()
             if len(providers) == 1:
                 selected_provider = providers[0]
                 print_info(f"Using AI provider: {selected_provider}")
             else:
-                print()
-                print("Available AI providers:")
-                for i, provider in enumerate(providers, 1):
-                    print(f"{i}. {provider}")
-                
-                while True:
-                    try:
-                        choice = int(input("Select AI provider (number): ").strip())
-                        if 1 <= choice <= len(providers):
-                            selected_provider = providers[choice - 1]
-                            break
-                        else:
-                            print_error("Invalid choice")
-                    except ValueError:
-                        print_error("Please enter a number")
+                selected_provider = None
+                if self._tui_available():
+                    choices = [{"name": p, "value": p} for p in providers]
+                    selected_provider = self._tui_select("Select AI provider", choices, add_back=True)
+                if not selected_provider:
+                    print()
+                    print("Available AI providers:")
+                    for i, provider in enumerate(providers, 1):
+                        print(f"{i}. {provider}")
+                    while True:
+                        raw = input("Select AI provider (number, or 'b' to go back): ").strip().lower()
+                        if raw == 'b':
+                            print_info("Cancelled")
+                            return True
+                        try:
+                            choice = int(raw)
+                            if 1 <= choice <= len(providers):
+                                selected_provider = providers[choice - 1]
+                                break
+                            else:
+                                print_error("Invalid choice")
+                        except ValueError:
+                            print_error("Please enter a number")
             
             provider = self.ai_manager.get_provider(selected_provider)
             
@@ -1528,15 +1880,15 @@ class TranslateRCLI:
         print()
         
         try:
-            # Get app ID from user
-            app_id = input("Enter your App ID: ").strip()
-            if not app_id:
-                print_error("App ID is required")
+            # Pick app from list or paste an ID
+            app_id = self.prompt_app_id()
+            if app_id is None:
+                print_info("Cancelled")
                 return True
             
             # Validate app ID exists by trying to get its versions
             try:
-                version_test = self.asc_client.get_latest_app_store_version(app_id)
+                version_test = self.asc_client.get_latest_app_store_version_info(app_id)
                 if not version_test:
                     print_error("No App Store version found for this app. Please check your App ID.")
                     return True
@@ -1547,7 +1899,7 @@ class TranslateRCLI:
                 return True
             
             # Get app name for export file
-            apps_response = self.asc_client.get_apps()
+            apps_response = self.asc_client.get_apps(limit=200)
             app_name = "Unknown App"
             for app in apps_response.get("data", []):
                 if app["id"] == app_id:

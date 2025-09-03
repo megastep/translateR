@@ -10,6 +10,7 @@ import time
 import requests
 from typing import Dict, Any, Optional, List
 import random
+from urllib.parse import urlparse, parse_qs
 
 
 class AppStoreConnectClient:
@@ -70,9 +71,41 @@ class AppStoreConnectClient:
                 else:
                     raise e
     
-    def get_apps(self) -> Any:
-        """Get list of apps."""
-        return self._request("GET", "apps")
+    def get_apps(self, limit: int = 200) -> Any:
+        """Get list of apps.
+
+        Args:
+            limit: Maximum number of apps to fetch (max 200)
+        """
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", "apps", params=params)
+
+    def get_apps_page(self, limit: int = 50, cursor: Optional[str] = None) -> Dict[str, Any]:
+        """Get a single page of apps with optional cursor-based pagination.
+
+        Args:
+            limit: Items per page (1-200)
+            cursor: Optional cursor token from previous response's next link
+
+        Returns:
+            Dict with keys: 'data' (list of apps), 'next_cursor' (str or None)
+        """
+        params: Dict[str, Any] = {"limit": max(1, min(limit, 200))}
+        if cursor:
+            params["cursor"] = cursor
+        resp = self._request("GET", "apps", params=params)
+        next_link = resp.get("links", {}).get("next")
+        next_cursor: Optional[str] = None
+        if next_link:
+            try:
+                qs = parse_qs(urlparse(next_link).query)
+                # App Store Connect uses 'cursor' param for pagination
+                cur = qs.get("cursor", [])
+                if cur:
+                    next_cursor = cur[0]
+            except Exception:
+                next_cursor = None
+        return {"data": resp.get("data", []), "next_cursor": next_cursor}
     
     def get_latest_app_store_version(self, app_id: str) -> Optional[str]:
         """Get the latest App Store version ID for an app."""
@@ -81,6 +114,23 @@ class AppStoreConnectClient:
         if versions:
             return versions[0]["id"]
         return None
+
+    def get_latest_app_store_version_info(self, app_id: str) -> Optional[Dict[str, str]]:
+        """Get latest App Store version info including human-readable version string.
+
+        Returns a dict with keys: 'id', 'versionString', and 'appStoreState'.
+        """
+        response = self._request("GET", f"apps/{app_id}/appStoreVersions")
+        versions = response.get("data", [])
+        if not versions:
+            return None
+        v = versions[0]
+        attrs = v.get("attributes", {})
+        return {
+            "id": v.get("id"),
+            "versionString": attrs.get("versionString"),
+            "appStoreState": attrs.get("appStoreState"),
+        }
     
     def get_app_store_version_localizations(self, version_id: str) -> Any:
         """Get all localizations for a specific App Store version."""

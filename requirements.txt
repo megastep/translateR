@@ -10,3 +10,6 @@ requests>=2.32.0
 
 # Optional: For future enhanced CLI experience
 # colorama>=0.4.6  # Cross-platform colored terminal output
+
+# Interactive TUI (arrow-key app picker, fuzzy search)
+InquirerPy>=0.3.4
