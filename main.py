@@ -229,6 +229,9 @@ class TranslateRCLI:
         text pager with n/p/q if unavailable.
         """
         # Try modern TUI first
+        # Reset last TUI reason for a fresh attempt
+        if hasattr(self, "_last_tui_reason"):
+            self._last_tui_reason = None
         app_id = self._prompt_app_id_tui()
         if app_id is not None:
             # Clear last TUI reason on success
@@ -368,8 +371,9 @@ class TranslateRCLI:
             self._last_tui_reason = "no apps found"
             return None
 
+        # Do NOT include a Back item here; fuzzy prompts default to first item,
+        # which can cause accidental cancellation. Users can still cancel via ESC/Ctrl+C.
         choices: List[dict] = [
-            {"name": "← Back", "value": "__back__"},
             {"name": "Paste App ID manually...", "value": "__manual__"},
         ]
         for app in apps:
@@ -389,9 +393,7 @@ class TranslateRCLI:
             self._last_tui_reason = f"interactive prompt failed: {e}"
             return None
 
-        if result == "__back__":
-            self._last_tui_reason = "cancelled"
-            return None
+        # Fuzzy prompt cancellation is handled by exception; no explicit Back here
         if result == "__manual__":
             app_id = input("Enter your App ID: ").strip()
             return app_id or None
@@ -432,64 +434,561 @@ class TranslateRCLI:
             if add_back:
                 choices = ([{"name": "← Back", "value": "__back__"}] + list(choices))
             result = inquirer.checkbox(message=message, choices=choices).execute()
-            # If user selected Back alone, treat as cancel
-            if isinstance(result, list) and "__back__" in result and len(result) == 1:
-                return None
-            # Filter out back sentinel if mixed
             if isinstance(result, list):
+                # If user selected Back alone, treat as cancel
+                if "__back__" in result and len(result) == 1:
+                    return None
+                # Filter out back sentinel if mixed
                 result = [v for v in result if v != "__back__"]
             return result
         except Exception:
             return None
+
+    def _tui_confirm(self, message: str, default: bool = True) -> Optional[bool]:
+        try:
+            from InquirerPy import inquirer
+        except Exception:
+            return None
+        try:
+            return bool(inquirer.confirm(message=message, default=default).execute())
+        except Exception:
+            return None
+
+    def _tui_text(self, message: str) -> Optional[str]:
+        try:
+            from InquirerPy import inquirer
+        except Exception:
+            return None
+        try:
+            return inquirer.text(message=message).execute()
+        except Exception:
+            return None
+
+    def _tui_editor(self, message: str, default: str = "") -> Optional[str]:
+        try:
+            from InquirerPy import inquirer
+        except Exception:
+            return None
+        try:
+            return inquirer.editor(message=message, default=default).execute()
+        except Exception:
+            return None
+
+    def _prompt_multiline(self, prompt: str, initial: str = "") -> Optional[str]:
+        """Prompt the user for multiline text. Uses TUI editor if available, else reads until a single line 'EOF'."""
+        # Prefer TUI editor
+        edited = self._tui_editor(prompt, default=initial) if self._tui_available() else None
+        if edited is not None:
+            return edited
+        # Console fallback
+        print(prompt)
+        if initial:
+            print("(Initial text shown below; edit and re-enter if needed)")
+            print("-" * 40)
+            print(initial)
+            print("-" * 40)
+        print("Enter text. Finish with a line containing only 'EOF'.")
+        lines: List[str] = []
+        while True:
+            try:
+                line = input()
+            except EOFError:
+                break
+            if line.strip() == 'EOF':
+                break
+            lines.append(line)
+        text = "\n".join(lines).strip()
+        return text if text else None
+
+    def release_mode(self):
+        """Release Mode - Create 'What's New' notes for new versions.
+
+        Detects empty release notes across existing localizations of the latest
+        version, prompts for base notes if needed, and translates into the
+        selected target languages using the chosen AI provider.
+        """
+        print_info("Release Mode - Create and translate release notes")
+        print()
+
+        try:
+            # Pick app (TUI-aware)
+            app_id = self.prompt_app_id()
+            if app_id is None:
+                print_info("Cancelled")
+                return True
+
+            # Fetch versions and handle multi-platform (iOS/macOS/etc.) selection
+            versions_resp = self.asc_client._request("GET", f"apps/{app_id}/appStoreVersions")
+            versions = versions_resp.get("data", [])
+            if not versions:
+                print_error("No App Store versions found for this app")
+                return True
+
+            # Pick latest per platform (first seen assumed latest from API ordering)
+            latest_by_platform: Dict[str, dict] = {}
+            for v in versions:
+                attrs = v.get("attributes", {})
+                plat = attrs.get("platform", "UNKNOWN")
+                if plat not in latest_by_platform:
+                    latest_by_platform[plat] = v
+
+            plat_label = {
+                "IOS": "iOS",
+                "MAC_OS": "macOS",
+                "TV_OS": "tvOS",
+                "VISION_OS": "visionOS",
+                "UNKNOWN": "Unknown",
+            }
+
+            # Let user choose which platforms to update
+            selected_versions: Dict[str, dict] = {}
+            if self._tui_available():
+                choices = []
+                for plat, v in latest_by_platform.items():
+                    attrs = v.get("attributes", {})
+                    name = f"{plat_label.get(plat, plat)} v{attrs.get('versionString', 'Unknown')} ({attrs.get('appStoreState', 'Unknown')})"
+                    choices.append({"name": name, "value": plat, "enabled": True})
+                picked = self._tui_checkbox("Select platforms to update (Space to toggle, Enter to confirm)", choices, add_back=True)
+                if not picked:
+                    print_info("Cancelled")
+                    return True
+                for plat in picked:
+                    selected_versions[plat] = latest_by_platform[plat]
+            else:
+                print("Available platforms:")
+                plats = list(latest_by_platform.keys())
+                for i, plat in enumerate(plats, 1):
+                    attrs = latest_by_platform[plat].get("attributes", {})
+                    print(f"{i}. {plat_label.get(plat, plat)} v{attrs.get('versionString', 'Unknown')} ({attrs.get('appStoreState', 'Unknown')})")
+                raw = input("Select platforms (comma numbers) or Enter for all, 'b' to back: ").strip().lower()
+                if raw == 'b':
+                    print_info("Cancelled")
+                    return True
+                if not raw:
+                    picked_idx = list(range(1, len(plats) + 1))
+                else:
+                    try:
+                        picked_idx = [int(x.strip()) for x in raw.split(',')]
+                    except ValueError:
+                        print_error("Invalid selection")
+                        return True
+                for idx in picked_idx:
+                    if 1 <= idx <= len(plats):
+                        plat = plats[idx - 1]
+                        selected_versions[plat] = latest_by_platform[plat]
+
+            # Summarize selection
+            print_success("Selected platforms: " + ", ".join(plat_label.get(p, p) for p in selected_versions.keys()))
+
+            # Fetch localizations for each selected platform version and detect base
+            per_version_locales: Dict[str, Dict[str, dict]] = {}  # plat -> {locale: {id, attrs}}
+            base_locale = None
+            base_whats_new = ""
+            # Iterate selected platforms to build maps
+            for plat, ver in selected_versions.items():
+                vid = ver.get("id")
+                locs_resp = self.asc_client.get_app_store_version_localizations(vid)
+                locs = locs_resp.get("data", [])
+                locale_map: Dict[str, dict] = {}
+                for loc in locs:
+                    attrs = loc.get("attributes", {})
+                    locale_map[attrs.get("locale")] = {"id": loc.get("id"), **attrs}
+                per_version_locales[plat] = locale_map
+                # Establish base locale once using first version that yields one
+                if base_locale is None:
+                    detected = detect_base_language(locs)
+                    if detected:
+                        base_locale = detected
+                        base_whats_new = (locale_map.get(base_locale, {}).get("whatsNew") or "").strip()
+
+            if not base_locale:
+                print_error("Could not detect base language from selected platforms")
+                return True
+            print_info(f"Base language: {base_locale} ({APP_STORE_LOCALES.get(base_locale, 'Unknown')})")
+
+            # Decide source release notes (allow edit/custom if needed)
+            source_notes = base_whats_new
+            if base_whats_new:
+                # Offer Use / Edit / Enter custom
+                choice = None
+                if self._tui_available():
+                    choice = self._tui_select(
+                        "Source release notes",[
+                            {"name": "Use base language release notes", "value": "use"},
+                            {"name": "Edit base release notes", "value": "edit"},
+                            {"name": "Enter custom source notes", "value": "custom"},
+                        ], add_back=True)
+                    if choice is None:
+                        print_info("Cancelled")
+                        return True
+                else:
+                    raw = input("Use base release notes as source? (Y/n/e=edit,c=custom): ").strip().lower()
+                    if raw in ("", "y", "yes"): choice = "use"
+                    elif raw in ("n", "no"): choice = "custom"
+                    elif raw in ("e",): choice = "edit"
+                    elif raw in ("c",): choice = "custom"
+                    else:
+                        choice = "use"
+                if choice == "edit":
+                    edited = self._prompt_multiline("Edit base release notes (END with 'EOF'):", initial=base_whats_new)
+                    if not edited:
+                        print_warning("No content entered")
+                        return True
+                    source_notes = edited
+                elif choice == "custom":
+                    custom = self._prompt_multiline("Enter release notes to translate (END with 'EOF'):")
+                    if not custom:
+                        print_warning("No content entered")
+                        return True
+                    source_notes = custom
+                else:  # use
+                    source_notes = base_whats_new
+            else:
+                print_warning("Base language has no release notes. Please enter source notes.")
+                custom = self._prompt_multiline("Enter release notes to translate (END with 'EOF'):")
+                if not custom:
+                    print_warning("No source text entered")
+                    return True
+                source_notes = custom
+
+            # Determine target locales with empty 'whatsNew' per platform and union for translation
+            empty_by_platform: Dict[str, List[str]] = {}
+            union_empty: List[str] = []
+            for plat, locale_map in per_version_locales.items():
+                empties: List[str] = []
+                for locale, data in locale_map.items():
+                    if locale == base_locale:
+                        continue
+                    wn = (data.get("whatsNew") or "").strip()
+                    if not wn:
+                        empties.append(locale)
+                        if locale not in union_empty:
+                            union_empty.append(locale)
+                empty_by_platform[plat] = empties
+
+            if not union_empty:
+                print_info("All selected platforms already have release notes for this version")
+                return True
+
+            # Select target locales to fill
+            target_locales: List[str] = []
+            if self._tui_available():
+                # Default-select all empty locales so Enter accepts all
+                choices = [
+                    {"name": f"{loc} ({APP_STORE_LOCALES.get(loc, 'Unknown')})", "value": loc, "enabled": True}
+                    for loc in union_empty
+                ]
+                selected = self._tui_checkbox("Select locales to fill (Space to toggle, Enter to confirm)", choices, add_back=True)
+                if not selected:
+                    # If nothing selected, treat as selecting all
+                    selected = union_empty
+                target_locales = selected
+            else:
+                print("Locales missing release notes:")
+                for i, loc in enumerate(union_empty, 1):
+                    print(f"{i:2d}. {loc} ({APP_STORE_LOCALES.get(loc, 'Unknown')})")
+                raw = input("Enter locales (comma-separated) or 'b' to go back (blank = all): ").strip()
+                if raw.lower() == 'b':
+                    print_info("Cancelled")
+                    return True
+                if not raw:
+                    target_locales = union_empty
+                else:
+                    target_locales = [s.strip() for s in raw.split(',') if s.strip() in union_empty]
+                if not target_locales:
+                    print_warning("No valid locales selected")
+                    return True
+
+            # Choose AI provider
+            providers = self.ai_manager.list_providers()
+            if not providers:
+                print_error("No AI providers configured. Please run setup.")
+                return True
+            if len(providers) == 1:
+                selected_provider = providers[0]
+                print_info(f"Using AI provider: {selected_provider}")
+            else:
+                selected_provider = None
+                if self._tui_available():
+                    choices = [{"name": p, "value": p} for p in providers]
+                    selected_provider = self._tui_select("Select AI provider", choices, add_back=True)
+                if not selected_provider:
+                    print("Available AI providers:")
+                    for i, p in enumerate(providers, 1):
+                        print(f"{i}. {p}")
+                    raw = input("Select provider (number) or 'b' to go back: ").strip().lower()
+                    if raw == 'b':
+                        print_info("Cancelled")
+                        return True
+                    try:
+                        idx = int(raw)
+                        if 1 <= idx <= len(providers):
+                            selected_provider = providers[idx - 1]
+                        else:
+                            print_error("Invalid choice")
+                            return True
+                    except ValueError:
+                        print_error("Please enter a number")
+                        return True
+
+            provider = self.ai_manager.get_provider(selected_provider)
+
+            # Translate and update
+            print()
+            print_info(f"Translating release notes for {len(target_locales)} locales...")
+            # 1) Translate all first
+            limit = get_field_limit("whats_new") or 4000
+            translations: Dict[str, str] = {}
+            last_len = 0
+            for i, loc in enumerate(target_locales, 1):
+                language = APP_STORE_LOCALES.get(loc, loc)
+                # Inline progress update with padding to clear previous content
+                try:
+                    line = format_progress(i, len(target_locales), f"Translating {language}")
+                    pad = max(0, last_len - len(line))
+                    sys.stdout.write("\r" + line + (" " * pad))
+                    sys.stdout.flush()
+                    last_len = len(line)
+                except Exception:
+                    print(format_progress(i, len(target_locales), f"Translating {language}"))
+                try:
+                    txt = provider.translate(
+                        text=source_notes,
+                        target_language=language,
+                        max_length=limit,
+                        is_keywords=False,
+                    )
+                    txt = (txt or "").strip()
+                    if len(txt) > limit:
+                        txt = txt[:limit]
+                    translations[loc] = txt
+                    time.sleep(1)
+                except Exception as e:
+                    print_error(f"  ❌ Failed to translate {language}: {str(e)}")
+                    translations[loc] = ""
+                    continue
+            # End of progress line (clear and newline)
+            try:
+                sys.stdout.write("\r" + (" " * last_len) + "\r")
+                sys.stdout.flush()
+            except Exception:
+                pass
+            print()
+
+            # 2) Show all translations at once for review
+            print()
+            print_info("Preview generated release notes:")
+            for loc in target_locales:
+                language = APP_STORE_LOCALES.get(loc, loc)
+                print("-" * 60)
+                print(f"{language} [{loc}]")
+                print("-" * 60)
+                print(translations.get(loc, ""))
+                print()
+
+            # 3) Optionally edit selected locales
+            do_edit = None
+            if self._tui_available():
+                choice = self._tui_select(
+                    "Next step",
+                    [
+                        {"name": "Apply all now", "value": "apply"},
+                        {"name": "Edit selected locales", "value": "edit"},
+                        {"name": "Cancel", "value": "cancel"},
+                    ], add_back=True,
+                )
+                if choice is None or choice == "cancel":
+                    print_info("Cancelled")
+                    return True
+                do_edit = (choice == "edit")
+            else:
+                raw = input("Apply all (a) / Edit (e) / Cancel (c): ").strip().lower()
+                if raw == 'c':
+                    print_info("Cancelled")
+                    return True
+                do_edit = (raw == 'e')
+
+            if do_edit:
+                if self._tui_available():
+                    choices = [
+                        {"name": f"{APP_STORE_LOCALES.get(loc, loc)} [{loc}]", "value": loc}
+                        for loc in target_locales
+                    ]
+                    to_edit = self._tui_checkbox("Select locales to edit", choices, add_back=True)
+                    if not to_edit:
+                        print_warning("No locales selected for editing")
+                    else:
+                        for loc in to_edit:
+                            language = APP_STORE_LOCALES.get(loc, loc)
+                            edited = self._prompt_multiline(
+                                f"Edit release notes for {language} (END with 'EOF'):",
+                                initial=translations.get(loc, ""),
+                            )
+                            if edited is not None:
+                                edited = edited.strip()
+                                if len(edited) > limit:
+                                    edited = edited[:limit]
+                                translations[loc] = edited
+                else:
+                    raw = input("Enter locales to edit (comma-separated) or Enter to skip: ").strip()
+                    if raw:
+                        for loc in [s.strip() for s in raw.split(',') if s.strip() in target_locales]:
+                            language = APP_STORE_LOCALES.get(loc, loc)
+                            edited = self._prompt_multiline(
+                                f"Edit release notes for {language} (END with 'EOF'):",
+                                initial=translations.get(loc, ""),
+                            )
+                            if edited is not None:
+                                edited = edited.strip()
+                                if len(edited) > limit:
+                                    edited = edited[:limit]
+                                translations[loc] = edited
+
+            # 4) Confirm apply
+            proceed = None
+            if self._tui_available():
+                proceed = self._tui_confirm("Apply release notes to all listed locales?", True)
+            if proceed is None:
+                ans = input("Proceed to apply? (Y/n): ").strip().lower()
+                proceed = ans in ("", "y", "yes")
+            if not proceed:
+                print_info("Cancelled")
+                return True
+
+            # 5) Apply updates per selected platform (including base locale if it was empty there)
+            print()
+            for plat, locale_map in per_version_locales.items():
+                if plat not in selected_versions:
+                    continue
+                plat_name = plat_label.get(plat, plat)
+                print_info(f"Applying to {plat_name} ({len(target_locales)} locales)...")
+
+                # Update base locale if empty for that platform
+                base_empty_here = not (locale_map.get(base_locale, {}).get("whatsNew") or "").strip()
+                if base_empty_here:
+                    try:
+                        self.asc_client.update_app_store_version_localization(
+                            localization_id=locale_map[base_locale]["id"],
+                            whats_new=source_notes[:limit],
+                        )
+                        print_success(f"  Base locale {APP_STORE_LOCALES.get(base_locale, base_locale)} updated")
+                    except Exception as e:
+                        print_warning(f"  Could not update base locale: {str(e)}")
+
+                success = 0
+                total = len(target_locales)
+                last_len = 0
+                for i, loc in enumerate(target_locales, 1):
+                    # Only apply if locale is empty for this platform
+                    if loc not in empty_by_platform.get(plat, []):
+                        continue
+                    language = APP_STORE_LOCALES.get(loc, loc)
+                    # Inline progress update with padding
+                    try:
+                        line = format_progress(i, total, f"Updating {language} ({plat_name})")
+                        pad = max(0, last_len - len(line))
+                        sys.stdout.write("\r" + line + (" " * pad))
+                        sys.stdout.flush()
+                        last_len = len(line)
+                    except Exception:
+                        print(format_progress(i, total, f"Updating {language} ({plat_name})"))
+                    try:
+                        self.asc_client.update_app_store_version_localization(
+                            localization_id=locale_map[loc]["id"],
+                            whats_new=translations.get(loc, ""),
+                        )
+                        success += 1
+                        time.sleep(1)
+                    except Exception as e:
+                        print_error(f"  ❌ Failed to update {language} ({plat_name}): {str(e)}")
+                        continue
+                # Clear progress line and newline
+                try:
+                    sys.stdout.write("\r" + (" " * last_len) + "\r")
+                    sys.stdout.flush()
+                except Exception:
+                    pass
+                print()
+                print_success(f"{plat_name}: {success}/{len(empty_by_platform.get(plat, []))} locales updated")
+
+            # 6) Verify updates (best effort)
+            try:
+                verify_failures = 0
+                for plat, locale_map in per_version_locales.items():
+                    if plat not in selected_versions:
+                        continue
+                    for loc in empty_by_platform.get(plat, []):
+                        data = self.asc_client.get_app_store_version_localization(locale_map[loc]["id"]) or {}
+                        wn = (data.get("data", {}).get("attributes", {}).get("whatsNew") or "").strip()
+                        if not wn:
+                            verify_failures += 1
+                if verify_failures:
+                    print_warning(f"Release notes may not have applied to {verify_failures} locale(s). Ensure you are editing the correct version state in App Store Connect.")
+            except Exception:
+                # Non-fatal
+                pass
+
+            print()
+            print_success(f"Release notes completed! {success}/{len(target_locales)} locales updated")
+
+        except Exception as e:
+            print_error(f"Release Mode failed: {str(e)}")
+        
+        input("\nPress Enter to continue...")
+        return True
     
     def show_main_menu(self):
         """Display main menu and handle user choice."""
         # TUI-based main menu when available
         if self._tui_available():
             choices = [
-                {"name": "1. 🌐 Translation Mode - Translate to new languages", "value": "1"},
-                {"name": "2. 🔄 Update Mode - Update existing localizations", "value": "2"},
-                {"name": "3. 📋 Copy Mode - Copy from previous version", "value": "3"},
-                {"name": "4. 🚀 Full Setup Mode - Complete localization setup", "value": "4"},
-                {"name": "5. 📱 App Name & Subtitle Mode - Translate app name and subtitle", "value": "5"},
-                {"name": "6. 📄 Export Localizations - Export existing localizations to file", "value": "6"},
-                {"name": "7. ⚙️  Configuration - Manage API keys and settings", "value": "7"},
-                {"name": "8. ❌ Exit", "value": "8"},
+                {"name": "🌐 Translation Mode - Translate to new languages", "value": "1"},
+                {"name": "📝 Release Mode - Create release notes for new version", "value": "2"},
+                {"name": "🔄 Update Mode - Update existing localizations", "value": "3"},
+                {"name": "📋 Copy Mode - Copy from previous version", "value": "4"},
+                {"name": "🚀 Full Setup Mode - Complete localization setup", "value": "5"},
+                {"name": "📱 App Name & Subtitle Mode - Translate app name and subtitle", "value": "6"},
+                {"name": "📄 Export Localizations - Export existing localizations to file", "value": "7"},
+                {"name": "⚙️  Configuration - Manage API keys and settings", "value": "8"},
+                {"name": "❌ Exit", "value": "9"},
             ]
             choice = self._tui_select("TranslateR — Choose your workflow", choices) or ""
         else:
             print()
             print("🌍 TranslateR - Choose your workflow:")
             print("1. 🌐 Translation Mode - Translate to new languages")
-            print("2. 🔄 Update Mode - Update existing localizations")
-            print("3. 📋 Copy Mode - Copy from previous version") 
-            print("4. 🚀 Full Setup Mode - Complete localization setup")
-            print("5. 📱 App Name & Subtitle Mode - Translate app name and subtitle")
-            print("6. 📄 Export Localizations - Export existing localizations to file")
-            print("7. ⚙️  Configuration - Manage API keys and settings")
-            print("8. ❌ Exit")
+            print("2. 📝 Release Mode - Create release notes for new version")
+            print("3. 🔄 Update Mode - Update existing localizations")
+            print("4. 📋 Copy Mode - Copy from previous version") 
+            print("5. 🚀 Full Setup Mode - Complete localization setup")
+            print("6. 📱 App Name & Subtitle Mode - Translate app name and subtitle")
+            print("7. 📄 Export Localizations - Export existing localizations to file")
+            print("8. ⚙️  Configuration - Manage API keys and settings")
+            print("9. ❌ Exit")
             print()
-            choice = input("Select an option (1-8): ").strip()
-        
+            choice = input("Select an option (1-9): ").strip()
+
         if choice == "1":
             return self.translation_mode()
         elif choice == "2":
-            return self.update_mode()
+            return self.release_mode()
         elif choice == "3":
-            return self.copy_mode()
+            return self.update_mode()
         elif choice == "4":
-            return self.full_setup_mode()
+            return self.copy_mode()
         elif choice == "5":
-            return self.app_name_subtitle_mode()
+            return self.full_setup_mode()
         elif choice == "6":
-            return self.export_localizations_mode()
+            return self.app_name_subtitle_mode()
         elif choice == "7":
-            return self.configuration_mode()
+            return self.export_localizations_mode()
         elif choice == "8":
+            return self.configuration_mode()
+        elif choice == "9":
             print_info("Thank you for using TranslateR!")
             return False
         else:
-            print_error("Invalid choice. Please select 1-8.")
+            print_error("Invalid choice. Please select 1-9.")
             return True
     
     def translation_mode(self):
