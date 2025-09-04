@@ -1,6 +1,6 @@
 # TranslateR
 
-```
+```text
 ████████ ██████   █████  ███   ██  ███████ ██       █████  ████████ ███████ ██████  
    ██    ██   ██ ██   ██ ████  ██  ██      ██      ██   ██    ██    ██      ██   ██ 
    ██    ██████  ███████ ██ ██ ██  ███████ ██      ███████    ██    █████   ██████  
@@ -73,7 +73,7 @@ You can provide AI provider keys via environment variables; these override value
 - `ANTHROPIC_API_KEY`
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` or `GOOGLE_GEMINI_API_KEY`
 
-## 6 Main Workflows
+## 7 Main Workflows
 
 ### 1. 🌐 Translation Mode
 
@@ -84,7 +84,17 @@ You can provide AI provider keys via environment variables; these override value
 - Translates all metadata fields
 - Creates new localizations
 
-### 2. 🔄 Update Mode
+### 2. 📝 Release Mode
+
+**Use when**: Creating release notes ("What's New") for a new version
+
+- Select one or multiple platforms (iOS, macOS, tvOS, visionOS)
+- Detects locales missing release notes and selects them by default
+- Enter or edit source notes (English) if missing, or reuse base notes
+- Batch-translates all target locales, shows a full preview, lets you edit per-locale, then applies updates per platform
+- Updates the base locale if it's empty for a chosen platform
+
+### 3. 🔄 Update Mode
 
 **Use when**: Updating existing translations (e.g., new "What's New" content)
 
@@ -92,7 +102,7 @@ You can provide AI provider keys via environment variables; these override value
 - Choose which languages and fields to update
 - Perfect for version updates
 
-### 3. 📋 Copy Mode
+### 4. 📋 Copy Mode
 
 **Use when**: New app version with similar content
 
@@ -100,7 +110,7 @@ You can provide AI provider keys via environment variables; these override value
 - No translation needed
 - Fast setup for new versions
 
-### 4. 🚀 Full Setup Mode  
+### 5. 🚀 Full Setup Mode  
 
 **Use when**: Complete localization for new apps
 
@@ -108,7 +118,7 @@ You can provide AI provider keys via environment variables; these override value
 - Maximum global reach
 - One-command setup
 
-### 5. 📱 App Name & Subtitle Mode
+### 6. 📱 App Name & Subtitle Mode
 
 **Use when**: Translating app name and subtitle
 
@@ -116,7 +126,7 @@ You can provide AI provider keys via environment variables; these override value
 - 30-character limits enforced
 - Brand-focused translations
 
-### 6. 📄 Export Localizations
+### 7. 📄 Export Localizations
 
 **Use when**: Backing up or analyzing existing localizations
 
@@ -190,7 +200,7 @@ All AI requests and responses are automatically logged for debugging and quality
 
 **Log format example**:
 
-```
+```text
 [2025-08-05 10:30:15] REQUEST
 Provider: Anthropic Claude
 Model: claude-sonnet-4-20250514
