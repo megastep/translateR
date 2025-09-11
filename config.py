@@ -45,6 +45,7 @@ class ConfigManager:
         """Create default providers configuration."""
         default_providers = {
             "default_provider": "",  # optional: when set, used as default in workflows
+            "prompt_refinement": "",  # optional: phrase appended to translation prompts
             "anthropic": {
                 "name": "Anthropic Claude",
                 "class": "AnthropicProvider",
@@ -257,3 +258,18 @@ CRITICAL: If you cannot stay within character limits while preserving meaning, p
         cfg[provider_name] = prov
         self.save_providers(cfg)
         return True
+
+    # --- Prompt refinement helpers ---
+    def get_prompt_refinement(self) -> str:
+        """Return configured global prompt refinement phrase, or empty string."""
+        try:
+            cfg = self.load_providers()
+            val = cfg.get("prompt_refinement", "")
+            return val or ""
+        except Exception:
+            return ""
+
+    def set_prompt_refinement(self, phrase: str) -> None:
+        cfg = self.load_providers()
+        cfg["prompt_refinement"] = phrase or ""
+        self.save_providers(cfg)

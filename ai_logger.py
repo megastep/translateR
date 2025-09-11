@@ -51,7 +51,8 @@ Started: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
     
     def log_request(self, provider: str, model: str, text: str,
                    target_language: str, max_length: Optional[int] = None,
-                   is_keywords: bool = False, seed: Optional[int] = None):
+                   is_keywords: bool = False, seed: Optional[int] = None,
+                   refinement: Optional[str] = None):
         """
         Log AI translation request.
         
@@ -70,6 +71,7 @@ Started: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 Provider: {provider}
 Model: {model}
 Seed: {seed if seed is not None else 'n/a'}
+Refinement: {refinement if refinement else 'n/a'}
 Target Language: {target_language}
 Max Length: {max_length if max_length else "No limit"}
 Is Keywords: {is_keywords}
@@ -231,10 +233,11 @@ def get_ai_logger() -> AILogger:
 
 def log_ai_request(provider: str, model: str, text: str,
                   target_language: str, max_length: Optional[int] = None,
-                  is_keywords: bool = False, seed: Optional[int] = None):
+                  is_keywords: bool = False, seed: Optional[int] = None,
+                  refinement: Optional[str] = None):
     """Convenience function to log AI request."""
     logger = get_ai_logger()
-    logger.log_request(provider, model, text, target_language, max_length, is_keywords, seed)
+    logger.log_request(provider, model, text, target_language, max_length, is_keywords, seed, refinement)
 
 
 def log_ai_response(provider: str, translated_text: str = "", 

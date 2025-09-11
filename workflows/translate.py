@@ -176,6 +176,8 @@ def run(cli) -> bool:
                         print_error("Invalid selection")
                         return True
     provider = manager.get_provider(selected_provider)
+    # Use global refinement (no per-run prompt here; free text not requested)
+    refine_phrase = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
     # Show provider/model and choose seed for this run
     pname, pmodel = provider_model_info(provider, selected_provider)
     seed = random.randint(1, 2**31 - 1)
@@ -187,14 +189,14 @@ def run(cli) -> bool:
         language_name = APP_STORE_LOCALES.get(loc, loc)
         translated = {}
         if base_data.get("description"):
-            translated["description"] = provider.translate(base_data["description"], language_name, max_length=get_field_limit("description"), seed=seed)
+            translated["description"] = provider.translate(base_data["description"], language_name, max_length=get_field_limit("description"), seed=seed, refinement=refine_phrase)
         if base_data.get("keywords"):
-            kw = provider.translate(base_data["keywords"], language_name, max_length=get_field_limit("keywords"), is_keywords=True, seed=seed)
+            kw = provider.translate(base_data["keywords"], language_name, max_length=get_field_limit("keywords"), is_keywords=True, seed=seed, refinement=refine_phrase)
             translated["keywords"] = truncate_keywords(kw)
         if base_data.get("promotionalText"):
-            translated["promotionalText"] = provider.translate(base_data["promotionalText"], language_name, max_length=get_field_limit("promotional_text"), seed=seed)
+            translated["promotionalText"] = provider.translate(base_data["promotionalText"], language_name, max_length=get_field_limit("promotional_text"), seed=seed, refinement=refine_phrase)
         if base_data.get("whatsNew"):
-            translated["whatsNew"] = provider.translate(base_data["whatsNew"], language_name, max_length=get_field_limit("whats_new"), seed=seed)
+            translated["whatsNew"] = provider.translate(base_data["whatsNew"], language_name, max_length=get_field_limit("whats_new"), seed=seed, refinement=refine_phrase)
         time.sleep(1)
         return translated
 

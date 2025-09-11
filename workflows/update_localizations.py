@@ -176,6 +176,8 @@ def run(cli) -> bool:
                         print_error("Invalid selection")
                         return True
     provider = manager.get_provider(selected_provider)
+    # Use global refinement (no per-run prompt here; free text not requested)
+    refine_phrase = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
     # Show provider/model and choose seed
     pname, pmodel = provider_model_info(provider, selected_provider)
     seed = random.randint(1, 2**31 - 1)
@@ -206,7 +208,7 @@ def run(cli) -> bool:
                 continue
             is_keywords = field == "keywords"
             max_length = get_field_limit(field.replace("_", ""))
-            out = provider.translate(source_content, language_name, max_length=max_length, is_keywords=is_keywords, seed=seed)
+            out = provider.translate(source_content, language_name, max_length=max_length, is_keywords=is_keywords, seed=seed, refinement=refine_phrase)
             if is_keywords:
                 out = truncate_keywords(out.strip())
             translated[field] = out

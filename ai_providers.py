@@ -26,7 +26,8 @@ class AIProvider(ABC):
     def translate(self, text: str, target_language: str, 
                   max_length: Optional[int] = None, 
                   is_keywords: bool = False,
-                  seed: Optional[int] = None) -> str:
+                  seed: Optional[int] = None,
+                  refinement: Optional[str] = None) -> str:
         """
         Translate text to target language.
         
@@ -57,10 +58,11 @@ class AnthropicProvider(AIProvider):
     def translate(self, text: str, target_language: str,
                   max_length: Optional[int] = None,
                   is_keywords: bool = False,
-                  seed: Optional[int] = None) -> str:
+                  seed: Optional[int] = None,
+                  refinement: Optional[str] = None) -> str:
         """Translate using Anthropic Claude."""
         # Log the request
-        log_ai_request("Anthropic Claude", self.model, text, target_language, max_length, is_keywords, seed)
+        log_ai_request("Anthropic Claude", self.model, text, target_language, max_length, is_keywords, seed, refinement)
         
         try:
             url = "https://api.anthropic.com/v1/messages"
@@ -88,6 +90,8 @@ class AnthropicProvider(AIProvider):
                     f"Create a concise but meaningful translation that captures the essence of the "
                     f"original message while staying within the character limit."
                 )
+            if refinement:
+                system_message += f" Additional guidance: {refinement}"
             
             data = {
                 "model": self.model,
@@ -183,11 +187,14 @@ class OpenAIProvider(AIProvider):
     def translate(self, text: str, target_language: str,
                   max_length: Optional[int] = None,
                   is_keywords: bool = False,
-                  seed: Optional[int] = None) -> str:
+                  seed: Optional[int] = None,
+                  refinement: Optional[str] = None) -> str:
         """Translate using OpenAI GPT."""
         # Log the request
-        log_ai_request("OpenAI GPT", self.model, text, target_language, max_length, is_keywords, seed)
-        
+        log_ai_request("OpenAI GPT", self.model, text, target_language, max_length, is_keywords, seed, refinement)
+
+        is_gpt_5 = self.model.startswith("gpt-5")
+
         try:
             url = "https://api.openai.com/v1/chat/completions"
             headers = {
@@ -197,17 +204,27 @@ class OpenAIProvider(AIProvider):
             
             # Build system message
             system_message = (
-                f"You are a professional translator specializing in App Store metadata translation. "
-                f"Translate the following text to {target_language}. "
-                f"Maintain the marketing tone, formatting and style of the original text."
+                f"You are a professional translator specializing in App Store metadata translation.\n\n"
+                f"# Core Instructions\n"
+                f"- Translate the following text to {target_language}.\n"
+                f"- Maintain the marketing tone, formatting and style of the original text.\n"
             )
             
             if is_keywords:
-                system_message += " For keywords, provide a comma-separated list and keep it concise."
+                system_message += "- For keywords, provide a comma-separated list and keep it concise.\n"
             
             if max_length:
                 system_message += (
-                    f" Create a concise but meaningful translation that captures the essence of the original message."
+                    f"- Create a concise but meaningful translation that captures the essence of the original message.\n"
+                )
+            if refinement:
+                system_message += f"- Additional guidance: {refinement}\n"
+
+            if is_gpt_5:
+                system_message += (
+                    f"\n# Reasoning Instructions\n"
+                    f"- - After completing the translation, review your output to confirm all content is accurately and fully translated and meets stylistic and tone requirements.\n"
+                    f"- If any issues are detected, self-correct before finalizing.\n"
                 )
             
             data = {
@@ -216,8 +233,8 @@ class OpenAIProvider(AIProvider):
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": text}
                 ],
-                "max_completion_tokens" if self.model.startswith("gpt-5") else "max_tokens": 1000,
-                "temperature": 1.0 if self.model.startswith("gpt-5") else 0.7
+                "max_completion_tokens" if is_gpt_5 else "max_tokens": 2000,
+                "temperature": 1.0 if is_gpt_5 else 0.7
             }
             if seed is not None:
                 # Some models may reject seed; we'll retry without it if needed
@@ -314,6 +331,7 @@ class OpenAIProvider(AIProvider):
 
 
 class GoogleGeminiProvider(AIProvider):
+
     """Google Gemini provider."""
     
     def __init__(self, api_key: str, model: str = None):
@@ -323,10 +341,11 @@ class GoogleGeminiProvider(AIProvider):
     def translate(self, text: str, target_language: str,
                   max_length: Optional[int] = None,
                   is_keywords: bool = False,
-                  seed: Optional[int] = None) -> str:
+                  seed: Optional[int] = None,
+                  refinement: Optional[str] = None) -> str:
         """Translate using Google Gemini."""
         # Log the request
-        log_ai_request("Google Gemini", self.model, text, target_language, max_length, is_keywords, seed)
+        log_ai_request("Google Gemini", self.model, text, target_language, max_length, is_keywords, seed, refinement)
         
         try:
             url = f"https://generativelanguage.googleapis.com/v1/models/{self.model}:generateContent?key={self.api_key}"
@@ -352,6 +371,8 @@ class GoogleGeminiProvider(AIProvider):
                     f"Create a concise but meaningful translation that captures the essence of the "
                     f"original message while staying within the character limit."
                 )
+            if refinement:
+                prompt += f"\nAdditional guidance: {refinement}"
             
             prompt += f"\n\nText to translate: {text}"
             

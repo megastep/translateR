@@ -87,6 +87,11 @@ Concurrency (advanced):
 - Choose the default model per provider: “⚙️  Configuration” → “Set default model per provider”.
 - You can still choose a different provider at runtime; when a default exists you’ll be prompted to confirm or pick another.
 
+### Prompt Refinement (optional)
+
+- Set a global translation guidance phrase: in the CLI, open “⚙️  Configuration” → “Set translation prompt refinement”.
+- During workflows, you can enter a per-run refinement phrase; the tool appends it to the system/prompt sent to the AI.
+
 ## 7 Main Workflows
 
 ### 1. 🌐 Translation Mode

@@ -110,6 +110,8 @@ def run(cli) -> bool:
                         print_error("Invalid selection")
                         return True
     provider = manager.get_provider(selected_provider)
+    # Use global refinement (no per-run prompt here; free text not requested)
+    refine_phrase = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
     # Show provider/model and choose seed
     pname, pmodel = provider_model_info(provider, selected_provider)
     seed = random.randint(1, 2**31 - 1)
@@ -118,8 +120,8 @@ def run(cli) -> bool:
     print_info(f"Starting app name & subtitle translation for {len(target_locales)} languages...")
     def _task(loc: str):
         language_name = APP_STORE_LOCALES.get(loc, loc)
-        name_out = provider.translate(base_name, language_name, max_length=get_field_limit("name"), seed=seed) if base_name else None
-        subtitle_out = provider.translate(base_subtitle, language_name, max_length=get_field_limit("subtitle"), seed=seed) if base_subtitle else None
+        name_out = provider.translate(base_name, language_name, max_length=get_field_limit("name"), seed=seed, refinement=refine_phrase) if base_name else None
+        subtitle_out = provider.translate(base_subtitle, language_name, max_length=get_field_limit("subtitle"), seed=seed, refinement=refine_phrase) if base_subtitle else None
         time.sleep(1)
         return {"name": name_out, "subtitle": subtitle_out}
 

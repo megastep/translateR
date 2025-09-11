@@ -335,6 +335,77 @@ def parallel_map_locales(
     return results, errors
 
 
+# --------------------------
+# Prompt refinement helpers
+# --------------------------
+
+REFINE_HEADER = "# Prompt Refinement: add notes below to guide the translation"
+REFINE_PROMPT_PREFIX = "# PROMPT:"
+
+
+def build_refinement_template(default_refinement: str, body: str) -> str:
+    """Build a pre-filled multiline template including refinement comments and body.
+
+    Comments are ignored when sending text for translation; users can edit the
+    PROMPT line and/or add additional comment lines starting with '#'.
+    """
+    lines = [
+        REFINE_HEADER,
+        f"{REFINE_PROMPT_PREFIX} {default_refinement}".rstrip(),
+        "",
+    ]
+    if body:
+        lines.append(body)
+    return "\n".join(lines)
+
+
+def parse_refinement_template(text: str, fallback_default: str = "") -> (str, str):
+    """Parse an edited template into (clean_text, refinement_phrase).
+
+    - Collects the '# PROMPT:' line value if present (else uses fallback_default)
+    - Concatenates any additional comment lines (starting with '#') as extra guidance
+    - Returns the non-comment body as the translation text (stripped)
+    """
+    if text is None:
+        return "", (fallback_default or "")
+    refinement_from_prompt = None
+    extra_guidance: List[str] = []
+    body_lines: List[str] = []
+    in_header = True
+    for raw in text.splitlines():
+        line = raw.rstrip("\n")
+        stripped = line.strip()
+        if stripped.startswith("#") and in_header:
+            # Comment header section
+            if stripped.upper().startswith(REFINE_PROMPT_PREFIX):
+                # After ':' is the default refinement; keep exact text after prefix
+                idx = line.find(":")
+                val = line[idx + 1:].strip() if idx != -1 else ""
+                refinement_from_prompt = val
+            elif stripped == REFINE_HEADER:
+                # Skip header marker
+                pass
+            else:
+                # Treat any other header comment lines as extra guidance
+                extra = line.lstrip("#").strip()
+                if extra:
+                    extra_guidance.append(extra)
+            continue
+        else:
+            in_header = False
+            body_lines.append(raw)
+    clean_text = "\n".join(body_lines).strip()
+    base_refine = refinement_from_prompt if (refinement_from_prompt is not None) else (fallback_default or "")
+    if extra_guidance:
+        if base_refine:
+            combined = base_refine + " \n" + " \n".join(extra_guidance)
+        else:
+            combined = " \n".join(extra_guidance)
+    else:
+        combined = base_refine
+    return clean_text, combined.strip()
+
+
 def print_success(message: str):
     """Print success message with formatting."""
     print(f"✅ {message}")

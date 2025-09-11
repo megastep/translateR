@@ -472,6 +472,7 @@ class TranslateRCLI:
                     {"name": "Reconfigure API keys (ASC + AI)", "value": "keys"},
                     {"name": "Set default AI provider", "value": "provider"},
                     {"name": "Set default model per provider", "value": "models"},
+                    {"name": "Set translation prompt refinement", "value": "refine"},
                     {"name": "Back", "value": "back"},
                 ]
             ) or "back"
@@ -480,9 +481,10 @@ class TranslateRCLI:
             print("1) Reconfigure API keys (ASC + AI)")
             print("2) Set default AI provider")
             print("3) Set default model per provider")
-            print("4) Back")
-            raw = input("Select (1-4): ").strip()
-            choice = {"1": "keys", "2": "provider", "3": "models", "4": "back"}.get(raw, "back")
+            print("4) Set translation prompt refinement")
+            print("5) Back")
+            raw = input("Select (1-5): ").strip()
+            choice = {"1": "keys", "2": "provider", "3": "models", "4": "refine", "5": "back"}.get(raw, "back")
 
         if choice == "keys":
             # Run the setup wizard to re-enter keys
@@ -587,6 +589,20 @@ class TranslateRCLI:
                         print_error("Failed to set default model")
                 except Exception:
                     print_error("Invalid selection")
+            return True
+        if choice == "refine":
+            # Set global prompt refinement phrase
+            current = self.config.get_prompt_refinement() or ""
+            print_info("Set a short phrase to guide translations (leave blank to clear).")
+            print(f"Current: '{current}'")
+            phrase = None
+            if self.ui.available():
+                phrase = self.ui.text("Enter prompt refinement (optional): ")
+            if phrase is None:
+                phrase = input("Enter prompt refinement (optional): ").strip()
+            # Accept blanks to clear
+            self.config.set_prompt_refinement(phrase)
+            print_success("Prompt refinement updated")
             return True
         # back or unknown
         return True

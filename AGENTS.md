@@ -76,12 +76,17 @@
 
 - Files in `config/` control providers and keys:
   - `api_keys.json`: App Store Connect and AI provider API keys.
-  - `providers.json`: Provider catalogue with `models`, `default_model`, and optional `default_provider`.
+  - `providers.json`: Provider catalogue with `models`, `default_model`, optional `default_provider`, and optional `prompt_refinement` (a short phrase injected into translation prompts).
 - In the CLI, open “⚙️  Configuration” to:
   - Reconfigure API keys.
   - Set the default AI provider (used as the suggested/one‑press choice in workflows).
   - Set the default model per provider (applied when initializing providers).
+  - Set a global prompt refinement phrase used to guide translations.
 - Workflows still allow picking a provider at runtime; when a default exists, you can confirm to use it or choose another.
+
+## Prompt Refinement
+
+- You can set a global refinement phrase in configuration; workflows also let you enter a per-run refinement. The phrase is appended to the system/prompt sent to providers (Anthropic/OpenAI/Gemini) as additional guidance.
 
 ## Testing Guidelines
 

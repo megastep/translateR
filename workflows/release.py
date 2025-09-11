@@ -7,7 +7,7 @@ import sys
 import time
 import random
 
-from utils import APP_STORE_LOCALES, get_field_limit, format_progress, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source
+from utils import APP_STORE_LOCALES, get_field_limit, format_progress, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source, build_refinement_template, parse_refinement_template
 
 
 def select_platform_versions(ui, asc_client, app_id: str):
@@ -118,7 +118,9 @@ def run(cli) -> bool:
         return True
     print_info(f"Base language: {base_locale} ({APP_STORE_LOCALES.get(base_locale, 'Unknown')})")
 
-    # Source notes
+    # Source notes + refinement via inline template
+    default_refine = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
+    refine_phrase = default_refine
     source_notes = base_whats_new
     if base_whats_new:
         choice = None
@@ -142,26 +144,44 @@ def run(cli) -> bool:
             elif raw in ("c",): choice = "custom"
             else: choice = "use"
         if choice == "edit":
-            edited = ui.prompt_multiline("Edit base release notes (END with 'EOF'):", initial=base_whats_new)
+            initial = build_refinement_template(refine_phrase or default_refine, base_whats_new)
+            edited = ui.prompt_multiline("Edit base release notes (END with 'EOF'):", initial=initial)
             if not edited:
                 print_warning("No content entered")
                 return True
-            source_notes = edited
+            clean, parsed_refine = parse_refinement_template(edited, fallback_default=refine_phrase or default_refine)
+            if not clean:
+                print_warning("No content entered")
+                return True
+            source_notes = clean
+            refine_phrase = parsed_refine
         elif choice == "custom":
-            custom = ui.prompt_multiline("Enter release notes to translate (END with 'EOF'):")
+            initial = build_refinement_template(refine_phrase or default_refine, "")
+            custom = ui.prompt_multiline("Enter release notes to translate (END with 'EOF'):", initial=initial)
             if not custom:
                 print_warning("No content entered")
                 return True
-            source_notes = custom
+            clean, parsed_refine = parse_refinement_template(custom, fallback_default=refine_phrase or default_refine)
+            if not clean:
+                print_warning("No content entered")
+                return True
+            source_notes = clean
+            refine_phrase = parsed_refine
         else:
             source_notes = base_whats_new
     else:
         print_warning("Base language has no release notes. Please enter source notes.")
-        custom = ui.prompt_multiline("Enter release notes to translate (END with 'EOF'):")
+        initial = build_refinement_template(refine_phrase or default_refine, "")
+        custom = ui.prompt_multiline("Enter release notes to translate (END with 'EOF'):", initial=initial)
         if not custom:
             print_warning("No source text entered")
             return True
-        source_notes = custom
+        clean, parsed_refine = parse_refinement_template(custom, fallback_default=refine_phrase or default_refine)
+        if not clean:
+            print_warning("No source text entered")
+            return True
+        source_notes = clean
+        refine_phrase = parsed_refine
 
     # Determine empty locales
     empty_by_platform: Dict[str, List[str]] = {}
@@ -261,7 +281,7 @@ def run(cli) -> bool:
         # Parallel translate all
         def _task(loc: str) -> str:
             language = APP_STORE_LOCALES.get(loc, loc)
-            txt = provider.translate(text=source_notes, target_language=language, max_length=limit, is_keywords=False, seed=seed)
+            txt = provider.translate(text=source_notes, target_language=language, max_length=limit, is_keywords=False, seed=seed, refinement=refine_phrase)
             txt = (txt or "").strip()
             if len(txt) > limit:
                 txt = txt[:limit]
@@ -298,11 +318,15 @@ def run(cli) -> bool:
                 print_info("Cancelled")
                 return True
             if choice == "reenter":
-                new_notes = ui.prompt_multiline("Enter new source release notes (END with 'EOF'):", initial=source_notes)
+                initial = build_refinement_template(refine_phrase or default_refine, source_notes)
+                new_notes = ui.prompt_multiline("Enter new source release notes (END with 'EOF'):", initial=initial)
                 if not new_notes:
                     print_warning("No content entered; keeping previous source notes.")
                 else:
-                    source_notes = new_notes
+                    clean, parsed_refine = parse_refinement_template(new_notes, fallback_default=refine_phrase or default_refine)
+                    if clean:
+                        source_notes = clean
+                        refine_phrase = parsed_refine
                 # Loop to re-translate
                 continue
             do_edit = (choice == "edit")
@@ -312,11 +336,15 @@ def run(cli) -> bool:
                 print_info("Cancelled")
                 return True
             if raw == 'r':
-                new_notes = ui.prompt_multiline("Enter new source release notes (END with 'EOF'):", initial=source_notes)
+                initial = build_refinement_template(refine_phrase or default_refine, source_notes)
+                new_notes = ui.prompt_multiline("Enter new source release notes (END with 'EOF'):", initial=initial)
                 if not new_notes:
                     print_warning("No content entered; keeping previous source notes.")
                 else:
-                    source_notes = new_notes
+                    clean, parsed_refine = parse_refinement_template(new_notes, fallback_default=refine_phrase or default_refine)
+                    if clean:
+                        source_notes = clean
+                        refine_phrase = parsed_refine
                 # Loop to re-translate
                 continue
             do_edit = (raw == 'e')
