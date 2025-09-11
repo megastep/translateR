@@ -5,8 +5,9 @@ Note: App Info is global at the app level (not per platform).
 
 from typing import Dict
 import time
+import random
 
-from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, format_progress
+from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, format_progress, parallel_map_locales, provider_model_info
 
 
 def run(cli) -> bool:
@@ -78,46 +79,70 @@ def run(cli) -> bool:
 
     # Provider
     provs = manager.list_providers()
+    selected_provider = None
     if len(provs) == 1:
         selected_provider = provs[0]
         print_info(f"Using AI provider: {selected_provider}")
     else:
-        selected_provider = None
-        if ui.available():
-            selected_provider = ui.select("Select AI provider", [{"name": p, "value": p} for p in provs], add_back=True)
+        default_provider = getattr(cli, 'config', None).get_default_ai_provider() if getattr(cli, 'config', None) else None
+        if default_provider and default_provider in provs:
+            use_default = ui.confirm(f"Use default AI provider: {default_provider}?", True)
+            if use_default is None:
+                raw = input(f"Use default provider '{default_provider}'? (Y/n): ").strip().lower()
+                use_default = raw in ("", "y", "yes")
+            if use_default:
+                selected_provider = default_provider
         if not selected_provider:
-            for i, p in enumerate(provs, 1):
-                print(f"{i}. {p}")
-            raw = input("Select provider (number): ").strip()
-            try:
-                idx = int(raw)
-                selected_provider = provs[idx - 1]
-            except Exception:
-                print_error("Invalid selection")
-                return True
+            if ui.available():
+                selected_provider = ui.select("Select AI provider", [{"name": p + ("  (default)" if p == default_provider else ""), "value": p} for p in provs], add_back=True)
+            if not selected_provider:
+                for i, p in enumerate(provs, 1):
+                    star = " *" if p == default_provider else ""
+                    print(f"{i}. {p}{star}")
+                raw = input("Select provider (number) (Enter = default): ").strip()
+                if not raw and default_provider and default_provider in provs:
+                    selected_provider = default_provider
+                else:
+                    try:
+                        idx = int(raw)
+                        selected_provider = provs[idx - 1]
+                    except Exception:
+                        print_error("Invalid selection")
+                        return True
     provider = manager.get_provider(selected_provider)
+    # Show provider/model and choose seed
+    pname, pmodel = provider_model_info(provider, selected_provider)
+    seed = random.randint(1, 2**31 - 1)
+    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
 
     print_info(f"Starting app name & subtitle translation for {len(target_locales)} languages...")
+    def _task(loc: str):
+        language_name = APP_STORE_LOCALES.get(loc, loc)
+        name_out = provider.translate(base_name, language_name, max_length=get_field_limit("name"), seed=seed) if base_name else None
+        subtitle_out = provider.translate(base_subtitle, language_name, max_length=get_field_limit("subtitle"), seed=seed) if base_subtitle else None
+        time.sleep(1)
+        return {"name": name_out, "subtitle": subtitle_out}
+
+    results, errs = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=0.0)
+
+    # Warn on empty translations per locale
+    for loc in target_locales:
+        language_name = APP_STORE_LOCALES.get(loc, loc)
+        data = results.get(loc) or {}
+        name_ok = (data.get("name") or "").strip()
+        subtitle_ok = (data.get("subtitle") or "").strip()
+        if not (name_ok or subtitle_ok):
+            print_warning(f"Empty translation for {language_name} [{loc}]")
+
     success = 0
-    for i, target_locale in enumerate(target_locales, 1):
-        language_name = APP_STORE_LOCALES.get(target_locale, "Unknown")
-        print()
-        print(format_progress(i, len(target_locales), f"Translating to {language_name}"))
+    for target_locale, data in results.items():
         try:
-            translated_name = None
-            translated_subtitle = None
-            if base_name:
-                translated_name = provider.translate(base_name, language_name, max_length=get_field_limit("name"))
-            if base_subtitle:
-                translated_subtitle = provider.translate(base_subtitle, language_name, max_length=get_field_limit("subtitle"))
-            asc.create_app_info_localization(app_info_id, target_locale, translated_name, translated_subtitle)
+            asc.create_app_info_localization(app_info_id, target_locale, data.get("name"), data.get("subtitle"))
             success += 1
-            time.sleep(1)
         except Exception as e:
-            print_error(f"  ❌ Failed to translate {language_name}: {str(e)}")
-            continue
+            language_name = APP_STORE_LOCALES.get(target_locale, target_locale)
+            print_error(f"  ❌ Failed to save {language_name}: {str(e)}")
 
     print_success(f"App name & subtitle translation completed! {success}/{len(target_locales)} languages translated successfully")
     input("\nPress Enter to continue...")
     return True
-

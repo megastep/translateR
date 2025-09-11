@@ -4,10 +4,12 @@ Update Mode workflow with multi-platform handling.
 
 from typing import Dict
 import time
+import random
 
 from utils import (
     APP_STORE_LOCALES, detect_base_language, get_field_limit, truncate_keywords,
     print_info, print_warning, print_error, format_progress,
+    parallel_map_locales, provider_model_info,
 )
 
 
@@ -143,24 +145,41 @@ def run(cli) -> bool:
 
     # Provider
     provs = manager.list_providers()
+    selected_provider = None
     if len(provs) == 1:
         selected_provider = provs[0]
         print_info(f"Using AI provider: {selected_provider}")
     else:
-        selected_provider = None
-        if ui.available():
-            selected_provider = ui.select("Select AI provider", [{"name": p, "value": p} for p in provs], add_back=True)
+        default_provider = getattr(cli, 'config', None).get_default_ai_provider() if getattr(cli, 'config', None) else None
+        if default_provider and default_provider in provs:
+            use_default = ui.confirm(f"Use default AI provider: {default_provider}?", True)
+            if use_default is None:
+                raw = input(f"Use default provider '{default_provider}'? (Y/n): ").strip().lower()
+                use_default = raw in ("", "y", "yes")
+            if use_default:
+                selected_provider = default_provider
         if not selected_provider:
-            for i, p in enumerate(provs, 1):
-                print(f"{i}. {p}")
-            raw = input("Select provider (number): ").strip()
-            try:
-                idx = int(raw)
-                selected_provider = provs[idx - 1]
-            except Exception:
-                print_error("Invalid selection")
-                return True
+            if ui.available():
+                selected_provider = ui.select("Select AI provider", [{"name": p + ("  (default)" if p == default_provider else ""), "value": p} for p in provs], add_back=True)
+            if not selected_provider:
+                for i, p in enumerate(provs, 1):
+                    star = " *" if p == default_provider else ""
+                    print(f"{i}. {p}{star}")
+                raw = input("Select provider (number) (Enter = default): ").strip()
+                if not raw and default_provider and default_provider in provs:
+                    selected_provider = default_provider
+                else:
+                    try:
+                        idx = int(raw)
+                        selected_provider = provs[idx - 1]
+                    except Exception:
+                        print_error("Invalid selection")
+                        return True
     provider = manager.get_provider(selected_provider)
+    # Show provider/model and choose seed
+    pname, pmodel = provider_model_info(provider, selected_provider)
+    seed = random.randint(1, 2**31 - 1)
+    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
 
     # Summary
     print_info("Update Summary:")
@@ -178,47 +197,52 @@ def run(cli) -> bool:
         return True
 
     print_info(f"Starting updates for {len(target_locales)} languages across {len(selected_versions)} platform(s)...")
-    for i, target_locale in enumerate(target_locales, 1):
-        language_name = APP_STORE_LOCALES.get(target_locale, "Unknown")
-        print()
-        print(format_progress(i, len(target_locales), f"Updating {language_name}"))
-        try:
-            # Build translations per field
-            translated = {}
-            for field in selected_fields:
-                field_name, source_content = field_mapping[field]
-                if not source_content:
-                    continue
-                is_keywords = field == "keywords"
-                max_length = get_field_limit(field.replace("_", ""))
-                out = provider.translate(source_content, language_name, max_length=max_length, is_keywords=is_keywords)
-                if is_keywords:
-                    out = truncate_keywords(out.strip())
-                translated[field] = out
+    def _task(loc: str):
+        language_name = APP_STORE_LOCALES.get(loc, loc)
+        translated = {}
+        for field in selected_fields:
+            field_name, source_content = field_mapping[field]
+            if not source_content:
+                continue
+            is_keywords = field == "keywords"
+            max_length = get_field_limit(field.replace("_", ""))
+            out = provider.translate(source_content, language_name, max_length=max_length, is_keywords=is_keywords, seed=seed)
+            if is_keywords:
+                out = truncate_keywords(out.strip())
+            translated[field] = out
+        time.sleep(1)
+        return translated
 
-            # Apply to each selected platform
-            for plat, ver in selected_versions.items():
-                locs = asc.get_app_store_version_localizations(ver["id"]).get("data", [])
-                loc_id = None
-                for l in locs:
-                    if l["attributes"]["locale"] == target_locale:
-                        loc_id = l["id"]
-                        break
-                if not loc_id:
-                    print_warning(f"  Locale {language_name} not found for platform {plat}; skipping")
-                    continue
-                asc.update_app_store_version_localization(
-                    localization_id=loc_id,
-                    description=translated.get("description"),
-                    keywords=translated.get("keywords"),
-                    promotional_text=translated.get("promotional_text"),
-                    whats_new=translated.get("whats_new"),
-                )
-            time.sleep(2)
-        except Exception as e:
-            print_error(f"  ❌ Failed to update {language_name}: {str(e)}")
-            continue
+    results, errs = parallel_map_locales(target_locales, _task, progress_action="Updated", pacing_seconds=0.0)
+
+    # Warn on empty translations per locale
+    for loc in target_locales:
+        language_name = APP_STORE_LOCALES.get(loc, loc)
+        data = results.get(loc) or {}
+        has_any = any((v or "").strip() for v in data.values() if isinstance(v, str))
+        if not has_any:
+            print_warning(f"Empty translation for {language_name} [{loc}]")
+
+    # Apply translations per platform
+    for target_locale, translated in results.items():
+        language_name = APP_STORE_LOCALES.get(target_locale, target_locale)
+        for plat, ver in selected_versions.items():
+            locs = asc.get_app_store_version_localizations(ver["id"]).get("data", [])
+            loc_id = None
+            for l in locs:
+                if l["attributes"]["locale"] == target_locale:
+                    loc_id = l["id"]
+                    break
+            if not loc_id:
+                print_warning(f"  Locale {language_name} not found for platform {plat}; skipping")
+                continue
+            asc.update_app_store_version_localization(
+                localization_id=loc_id,
+                description=translated.get("description"),
+                keywords=translated.get("keywords"),
+                promotional_text=translated.get("promotional_text"),
+                whats_new=translated.get("whats_new"),
+            )
 
     input("\nPress Enter to continue...")
     return True
-

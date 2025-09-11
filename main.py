@@ -13,6 +13,7 @@ Repository: https://github.com/emreertunc/translater
 import sys
 import os
 import time
+import random
 import re
 from typing import List, Optional, Any, Dict
 from pathlib import Path
@@ -51,6 +52,8 @@ class TranslateRCLI:
     def setup_ai_providers(self):
         """Initialize AI providers from configuration."""
         try:
+            # Reset manager to reflect latest config accurately
+            self.ai_manager = AIProviderManager()
             providers_config = self.config.load_providers()
             
             # Setup Anthropic
@@ -224,6 +227,22 @@ class TranslateRCLI:
             print_error("You must configure at least one AI provider!")
             return False
         
+        # Optionally set default provider now
+        configured = [k for k, v in api_keys["ai_providers"].items() if v]
+        if len(configured) > 1:
+            pick_default = input("Set a default AI provider now? (Y/n): ").strip().lower()
+            if pick_default in ("", "y", "yes"):
+                for i, p in enumerate(configured, 1):
+                    print(f"{i}. {provider_names.get(p, p)} ({p})")
+                raw = input("Select default provider (number): ").strip()
+                try:
+                    idx = int(raw)
+                    if 1 <= idx <= len(configured):
+                        self.config.set_default_ai_provider(configured[idx - 1])
+                        print_success(f"Default AI provider set to: {configured[idx - 1]}")
+                except Exception:
+                    print_warning("Skipping default provider selection")
+
         # Save configuration
         self.config.save_api_keys(api_keys)
         print_success("Configuration saved successfully!")
@@ -342,6 +361,8 @@ class TranslateRCLI:
                 print(f"📝 Subtitle: {base_subtitle}")
             
             success_count = 0
+            # Pick a per-run seed reused across locales
+            seed = random.randint(1, 2**31 - 1)
             
             for i, target_locale in enumerate(target_locales, 1):
                 language_name = APP_STORE_LOCALES.get(target_locale, target_locale)
@@ -357,7 +378,8 @@ class TranslateRCLI:
                         translated_name = provider.translate(
                             base_name,
                             language_name,
-                            max_length=30
+                            max_length=30,
+                            seed=seed
                         )
                         if len(translated_name) > 30:
                             translated_name = translated_name[:30]
@@ -369,7 +391,8 @@ class TranslateRCLI:
                         translated_subtitle = provider.translate(
                             base_subtitle,
                             language_name,
-                            max_length=30
+                            max_length=30,
+                            seed=seed
                         )
                         if len(translated_subtitle) > 30:
                             translated_subtitle = translated_subtitle[:30]
@@ -428,23 +451,144 @@ class TranslateRCLI:
         """Handle configuration management."""
         print_info("Configuration Mode - Manage your settings")
         
+        # Show current status
         print()
-        print("Available AI Providers:")
         providers = self.ai_manager.list_providers()
+        print("Available AI Providers:")
         if providers:
-            for provider in providers:
-                print(f"✅ {provider}")
+            for p in providers:
+                model = self.config.get_default_model(p) or "<unset>"
+                tag = " (default)" if (self.config.get_default_ai_provider() == p) else ""
+                print(f"  • {p}{tag} — model: {model}")
         else:
-            print("❌ No AI providers configured")
-        
-        print()
+            print("  ❌ No AI providers configured")
         print("App Store Connect:", "✅ Configured" if self.asc_client else "❌ Not configured")
-        
-        print()
-        reconfigure = input("Do you want to reconfigure settings? (y/n): ").strip().lower()
-        if reconfigure in ['y', 'yes']:
-            return self.setup_wizard()
-        
+
+        # Menu
+        if self.ui.available():
+            choice = self.ui.select(
+                "What would you like to configure?",
+                [
+                    {"name": "Reconfigure API keys (ASC + AI)", "value": "keys"},
+                    {"name": "Set default AI provider", "value": "provider"},
+                    {"name": "Set default model per provider", "value": "models"},
+                    {"name": "Back", "value": "back"},
+                ]
+            ) or "back"
+        else:
+            print()
+            print("1) Reconfigure API keys (ASC + AI)")
+            print("2) Set default AI provider")
+            print("3) Set default model per provider")
+            print("4) Back")
+            raw = input("Select (1-4): ").strip()
+            choice = {"1": "keys", "2": "provider", "3": "models", "4": "back"}.get(raw, "back")
+
+        if choice == "keys":
+            # Run the setup wizard to re-enter keys
+            ok = self.setup_wizard()
+            if ok:
+                self.setup_ai_providers()
+            return True
+        if choice == "provider":
+            # Pick default provider among configured
+            provs = self.ai_manager.list_providers()
+            if not provs:
+                print_error("No AI providers configured. Run setup first.")
+                return True
+            if self.ui.available():
+                cur = self.config.get_default_ai_provider()
+                selection = self.ui.select(
+                    "Select default provider",
+                    [{"name": p + ("  (current)" if p == cur else ""), "value": p} for p in provs],
+                    add_back=True,
+                )
+                if not selection:
+                    return True
+                self.config.set_default_ai_provider(selection)
+                print_success(f"Default AI provider set to: {selection}")
+            else:
+                cur = self.config.get_default_ai_provider()
+                for i, p in enumerate(provs, 1):
+                    star = " *current" if p == cur else ""
+                    print(f"{i}. {p}{star}")
+                raw = input("Select default provider (number) or Enter to clear: ").strip()
+                if not raw:
+                    self.config.set_default_ai_provider("")
+                    print_success("Default AI provider cleared")
+                else:
+                    try:
+                        idx = int(raw); assert 1 <= idx <= len(provs)
+                        self.config.set_default_ai_provider(provs[idx - 1])
+                        print_success(f"Default AI provider set to: {provs[idx - 1]}")
+                    except Exception:
+                        print_error("Invalid selection")
+            return True
+        if choice == "models":
+            # Set default model for a provider
+            provs_cfg = self.config.load_providers()
+            prov_keys = [p for p in ["anthropic", "openai", "google"] if p in provs_cfg]
+            if self.ui.available():
+                cur_provider = self.config.get_default_ai_provider()
+                pick = self.ui.select(
+                    "Select provider to configure",
+                    [{"name": (p + ("  (default provider)" if p == cur_provider else "")), "value": p} for p in prov_keys],
+                    add_back=True,
+                )
+                if not pick:
+                    return True
+                models = self.config.list_provider_models(pick) or []
+                if not models:
+                    print_error("No models listed for this provider in config/providers.json")
+                    return True
+                cur_model = self.config.get_default_model(pick)
+                sel_model = self.ui.select(
+                    "Select default model",
+                    [{"name": (m + ("  (current)" if m == cur_model else "")), "value": m} for m in models],
+                    add_back=True,
+                )
+                if not sel_model:
+                    return True
+                if self.config.set_default_model(pick, sel_model):
+                    print_success(f"Default model for {pick} set to: {sel_model}")
+                    # Reinitialize providers to apply
+                    self.setup_ai_providers()
+                else:
+                    print_error("Failed to set default model (not in list?)")
+            else:
+                # Show provider list with default provider marker and current model
+                cur_provider = self.config.get_default_ai_provider()
+                print("Providers available to configure:")
+                for p in prov_keys:
+                    tag = " (default provider)" if p == cur_provider else ""
+                    cur_model = self.config.get_default_model(p) or "<unset>"
+                    print(f"  • {p}{tag} — current model: {cur_model}")
+                pick = input("Enter provider key to configure (anthropic/openai/google): ").strip()
+                if pick not in prov_keys:
+                    print_error("Invalid provider key")
+                    return True
+                models = self.config.list_provider_models(pick) or []
+                if not models:
+                    print_error("No models listed for this provider in config/providers.json")
+                    return True
+                print("Models:")
+                cur_model = self.config.get_default_model(pick)
+                for i, m in enumerate(models, 1):
+                    star = " *current" if m == cur_model else ""
+                    print(f"{i}. {m}{star}")
+                raw = input("Select model (number): ").strip()
+                try:
+                    idx = int(raw); assert 1 <= idx <= len(models)
+                    model = models[idx - 1]
+                    if self.config.set_default_model(pick, model):
+                        print_success(f"Default model for {pick} set to: {model}")
+                        self.setup_ai_providers()
+                    else:
+                        print_error("Failed to set default model")
+                except Exception:
+                    print_error("Invalid selection")
+            return True
+        # back or unknown
         return True
     
     def show_logo(self):

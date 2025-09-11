@@ -73,6 +73,20 @@ You can provide AI provider keys via environment variables; these override value
 - `ANTHROPIC_API_KEY`
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` or `GOOGLE_GEMINI_API_KEY`
 
+Editor preferences (for multiline edits):
+
+- `VISUAL` or `EDITOR` (e.g., `export EDITOR="code -w"`, `vim`, `nano`)
+
+Concurrency (advanced):
+
+- `TRANSLATER_CONCURRENCY` controls how many locales are translated in parallel across workflows that perform translations. Default: number of CPU cores detected.
+
+### Provider Defaults (optional)
+
+- Set a default AI provider used in workflows: in the CLI, open “⚙️  Configuration” → “Set default AI provider”.
+- Choose the default model per provider: “⚙️  Configuration” → “Set default model per provider”.
+- You can still choose a different provider at runtime; when a default exists you’ll be prompted to confirm or pick another.
+
 ## 7 Main Workflows
 
 ### 1. 🌐 Translation Mode
@@ -92,6 +106,8 @@ You can provide AI provider keys via environment variables; these override value
 - Detects locales missing release notes and selects them by default
 - Enter or edit source notes (English) if missing, or reuse base notes
 - Batch-translates all target locales, shows a full preview, lets you edit per-locale, then applies updates per platform
+- If you're not happy with the results, re‑enter the source release notes and re‑translate before applying (available in both TUI and non‑TUI flows)
+- Editing opens your system editor (`$VISUAL`/`$EDITOR`) when available; otherwise a simple inline editor is provided
 - Updates the base locale if it's empty for a chosen platform
 
 ### 3. 🔄 Update Mode
@@ -181,7 +197,7 @@ Translating Spanish... ✓
 After first run, config files are created in `config/`:
 
 **`api_keys.json`** - Your API keys and credentials  
-**`providers.json`** - AI provider settings  
+**`providers.json`** - AI provider settings (models, defaults)  
 **`instructions.txt`** - Translation guidelines for AI
 
 ## Logging & Debugging

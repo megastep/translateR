@@ -44,6 +44,7 @@ class ConfigManager:
     def _create_default_providers(self):
         """Create default providers configuration."""
         default_providers = {
+            "default_provider": "",  # optional: when set, used as default in workflows
             "anthropic": {
                 "name": "Anthropic Claude",
                 "class": "AnthropicProvider",
@@ -165,6 +166,11 @@ CRITICAL: If you cannot stay within character limits while preserving meaning, p
         """Load available AI providers configuration."""
         with open(self.providers_file, "r") as f:
             return json.load(f)
+
+    def save_providers(self, providers: Dict[str, Any]) -> None:
+        """Persist providers configuration (models, defaults)."""
+        with open(self.providers_file, "w") as f:
+            json.dump(providers, f, indent=2)
     
     def load_api_keys(self) -> Dict[str, Any]:
         """Load API keys configuration."""
@@ -209,3 +215,45 @@ CRITICAL: If you cannot stay within character limits while preserving meaning, p
         # Fallback to config file
         api_keys = self.load_api_keys()
         return api_keys.get("ai_providers", {}).get(provider)
+
+    # --- Provider defaults helpers ---
+    def get_default_ai_provider(self) -> Optional[str]:
+        """Return configured default provider name, if any and non-empty."""
+        cfg = self.load_providers()
+        name = cfg.get("default_provider")
+        return name or None
+
+    def set_default_ai_provider(self, provider_name: Optional[str]) -> None:
+        """Set default provider (None or empty string to clear)."""
+        cfg = self.load_providers()
+        cfg["default_provider"] = provider_name or ""
+        self.save_providers(cfg)
+
+    def list_provider_models(self, provider_name: str) -> Optional[list]:
+        cfg = self.load_providers()
+        prov = cfg.get(provider_name)
+        if isinstance(prov, dict):
+            return prov.get("models")
+        return None
+
+    def get_default_model(self, provider_name: str) -> Optional[str]:
+        cfg = self.load_providers()
+        prov = cfg.get(provider_name)
+        if isinstance(prov, dict):
+            model = prov.get("default_model")
+            return model or None
+        return None
+
+    def set_default_model(self, provider_name: str, model: str) -> bool:
+        """Set default model for a provider. Returns True on success."""
+        cfg = self.load_providers()
+        prov = cfg.get(provider_name)
+        if not isinstance(prov, dict):
+            return False
+        models = prov.get("models", [])
+        if models and model not in models:
+            return False
+        prov["default_model"] = model
+        cfg[provider_name] = prov
+        self.save_providers(cfg)
+        return True

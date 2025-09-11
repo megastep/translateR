@@ -8,6 +8,10 @@ like the App selector. Designed for reuse across workflows.
 from typing import List, Optional, Any, Dict
 import os
 import sys
+import tempfile
+import shlex
+import subprocess
+import platform
 
 
 class UI:
@@ -89,11 +93,66 @@ class UI:
             return None
 
     # --- Composite prompts ---
+    def _default_editor_cmd(self) -> str:
+        vis = os.environ.get("VISUAL")
+        if vis:
+            return vis
+        edt = os.environ.get("EDITOR")
+        if edt:
+            return edt
+        if os.name == 'nt':
+            return 'notepad'
+        # Prefer nano if present; otherwise vi
+        for candidate in ("nano", "vi"):
+            return candidate
+
+    def _launch_system_editor(self, initial: str = "", filename_hint: str = "notes.txt") -> Optional[str]:
+        """Open the system editor ($VISUAL/$EDITOR) with initial content, return edited text.
+
+        Blocks until the editor exits. If the editor cannot be started or no
+        changes are made, returns the file contents (which may equal initial).
+        Returns None only if an unrecoverable error occurs or the file is empty.
+        """
+        # Create a temp file with initial content
+        suffix = "" if filename_hint.startswith('.') else ".txt"
+        try:
+            fd, path = tempfile.mkstemp(prefix="translater_", suffix=suffix)
+            os.close(fd)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(initial or "")
+
+            cmd_str = self._default_editor_cmd()
+            args = shlex.split(cmd_str) + [path]
+            try:
+                subprocess.run(args, check=False)
+            except FileNotFoundError:
+                # Final fallback to vi/notepad
+                fallback = 'notepad' if os.name == 'nt' else 'vi'
+                try:
+                    subprocess.run([fallback, path], check=False)
+                except Exception:
+                    return None
+
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+            return content or None
+        except Exception:
+            return None
+
     def prompt_multiline(self, prompt: str, initial: str = "") -> Optional[str]:
+        # First try TUI editor (which launches system editor when available)
         if self.available():
             edited = self.editor(prompt, default=initial)
             if edited is not None:
                 return edited
+        # Then try explicit system editor regardless of TUI availability
+        edited = self._launch_system_editor(initial=initial)
+        if edited is not None:
+            return edited
         # Fallback console EOF mode
         print(prompt)
         if initial:
@@ -220,4 +279,3 @@ class UI:
             print(f"Could not fetch apps list: {e}")
             app_id = input("Enter your App ID: ").strip()
             return app_id or None
-

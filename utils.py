@@ -5,6 +5,9 @@ Common helper functions used throughout the application.
 """
 
 import os
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -189,6 +192,147 @@ def format_progress(current: int, total: int, operation: str = "") -> str:
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
     
     return f"[{bar}] {percentage}% ({current}/{total}) {operation}"
+
+
+# --------------------------
+# Translation helpers (shared)
+# --------------------------
+
+def provider_model_info(provider: Any, fallback_name: Optional[str] = None) -> (str, Optional[str]):
+    """Return display-friendly provider name and model string."""
+    try:
+        name = provider.get_name()  # type: ignore[attr-defined]
+    except Exception:
+        name = fallback_name or str(provider)
+    model = getattr(provider, "model", None)
+    return name, model
+
+
+def show_provider_and_source(
+    provider: Any,
+    provider_key: Optional[str],
+    base_locale: str,
+    source_text: str,
+    title: str = "Source text to translate",
+    seed: Optional[int] = None,
+    **kwargs,
+) -> None:
+    """Print provider/model info and a source text preview with language.
+
+    Accepts optional seed for display; extra kwargs are ignored for forward compatibility.
+    """
+    name, model = provider_model_info(provider, provider_key)
+    if seed is not None:
+        print_info(f"AI provider: {name} — model: {model or 'n/a'} — seed: {seed}")
+    else:
+        print_info(f"AI provider: {name} — model: {model or 'n/a'}")
+    print_info(title + ":")
+    print("-" * 60)
+    print(f"Language: {APP_STORE_LOCALES.get(base_locale, base_locale)} [{base_locale}]")
+    print("-" * 60)
+    try:
+        sys.stdout.write(source_text + "\n\n")
+        sys.stdout.flush()
+    except Exception:
+        print(source_text)
+
+
+def parallel_map_locales(
+    target_locales: List[str],
+    task_fn,
+    progress_action: str = "Translated",
+    concurrency_env_var: str = "TRANSLATER_CONCURRENCY",
+    default_workers: Optional[int] = None,
+    pacing_seconds: float = 0.0,
+):
+    """Run per-locale tasks in parallel with progress and error reporting.
+
+    Args:
+        target_locales: List of locale codes to process.
+        task_fn: Callable(loc: str) -> Any. May raise to signal error.
+        progress_action: Verb displayed in progress line (e.g., "Translated").
+        concurrency_env_var: Env var name to override concurrency.
+        default_workers: Default max workers if env not set.
+        pacing_seconds: Optional sleep per task after completion (to ease rate limits).
+
+    Returns:
+        (results_by_locale, errors_by_locale)
+    """
+    total = len(target_locales)
+    results: Dict[str, Any] = {}
+    errors: Dict[str, str] = {}
+    if total == 0:
+        return results, errors
+
+    # Wrap the task to apply pacing
+    def _runner(loc: str):
+        try:
+            val = task_fn(loc)
+            return (loc, val, None)
+        except Exception as e:  # noqa: BLE001
+            return (loc, None, str(e))
+        finally:
+            if pacing_seconds and pacing_seconds > 0:
+                try:
+                    time.sleep(pacing_seconds)
+                except Exception:
+                    pass
+
+    # Resolve concurrency
+    # Determine default worker count: CPU count if not provided
+    cpu_default = os.cpu_count() or 4
+    base_default = default_workers if isinstance(default_workers, int) and default_workers > 0 else cpu_default
+    try:
+        env_val = os.environ.get(concurrency_env_var, str(base_default)) or str(base_default)
+        max_workers = max(1, min(total, int(env_val)))
+    except Exception:
+        max_workers = min(total, base_default)
+
+    completed = 0
+    # Show initial 0/x progress so users see activity immediately
+    last_len = 0
+    try:
+        line = format_progress(0, total, f"{progress_action}...")
+        sys.stdout.write("\r" + line)
+        sys.stdout.flush()
+        last_len = len(line)
+    except Exception:
+        try:
+            print(format_progress(0, total, f"{progress_action}..."))
+        except Exception:
+            pass
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_map = {ex.submit(_runner, loc): loc for loc in target_locales}
+        for fut in as_completed(future_map):
+            loc = future_map[fut]
+            language = APP_STORE_LOCALES.get(loc, loc)
+            try:
+                _loc, val, err = fut.result()
+            except Exception as e:  # shouldn't happen with wrapper, but safety
+                val, err = None, str(e)
+            if err:
+                print_error(f"  ❌ {progress_action} {language} failed: {err}")
+                errors[loc] = err
+            else:
+                results[loc] = val
+            completed += 1
+            # Progress update
+            try:
+                line = format_progress(completed, total, f"{progress_action} {language}")
+                pad = max(0, last_len - len(line))
+                sys.stdout.write("\r" + line + (" " * pad))
+                sys.stdout.flush()
+                last_len = len(line)
+            except Exception:
+                print(format_progress(completed, total, f"{progress_action} {language}"))
+    # Clear progress line
+    try:
+        sys.stdout.write("\r" + (" " * last_len) + "\r")
+        sys.stdout.flush()
+    except Exception:
+        pass
+    print()
+    return results, errors
 
 
 def print_success(message: str):

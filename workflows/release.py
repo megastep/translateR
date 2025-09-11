@@ -5,8 +5,9 @@ Release Mode workflow: create and translate What's New notes, multi-platform.
 from typing import Dict, List, Optional
 import sys
 import time
+import random
 
-from utils import APP_STORE_LOCALES, get_field_limit, format_progress, print_info, print_warning, print_success, print_error
+from utils import APP_STORE_LOCALES, get_field_limit, format_progress, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source
 
 
 def select_platform_versions(ui, asc_client, app_id: str):
@@ -205,123 +206,149 @@ def run(cli) -> bool:
     if not provs:
         print_error("No AI providers configured. Please run setup.")
         return True
+    selected_provider = None
     if len(provs) == 1:
         selected_provider = provs[0]
         print_info(f"Using AI provider: {selected_provider}")
     else:
-        selected_provider = None
-        if ui.available():
-            choices = [{"name": p, "value": p} for p in provs]
-            selected_provider = ui.select("Select AI provider", choices, add_back=True)
+        # Offer to use configured default provider if set
+        default_provider = getattr(cli, 'config', None).get_default_ai_provider() if getattr(cli, 'config', None) else None
+        if default_provider and default_provider in provs:
+            use_default = ui.confirm(f"Use default AI provider: {default_provider}?", True)
+            if use_default is None:
+                raw = input(f"Use default provider '{default_provider}'? (Y/n): ").strip().lower()
+                use_default = raw in ("", "y", "yes")
+            if use_default:
+                selected_provider = default_provider
         if not selected_provider:
-            print("Available AI providers:")
-            for i, p in enumerate(provs, 1):
-                print(f"{i}. {p}")
-            raw = input("Select provider (number) or 'b' to go back: ").strip().lower()
-            if raw == 'b':
-                print_info("Cancelled")
-                return True
-            try:
-                idx = int(raw)
-                if 1 <= idx <= len(provs):
-                    selected_provider = provs[idx - 1]
-                else:
-                    print_error("Invalid choice")
+            if ui.available():
+                choices = [{"name": p + ("  (default)" if p == default_provider else ""), "value": p} for p in provs]
+                selected_provider = ui.select("Select AI provider", choices, add_back=True)
+            if not selected_provider:
+                print("Available AI providers:")
+                for i, p in enumerate(provs, 1):
+                    star = " *" if p == default_provider else ""
+                    print(f"{i}. {p}{star}")
+                raw = input("Select provider (number) or 'b' to go back (Enter = default): ").strip().lower()
+                if raw == 'b':
+                    print_info("Cancelled")
                     return True
-            except ValueError:
-                print_error("Please enter a number")
-                return True
+                if not raw and default_provider and default_provider in provs:
+                    selected_provider = default_provider
+                else:
+                    try:
+                        idx = int(raw)
+                        if 1 <= idx <= len(provs):
+                            selected_provider = provs[idx - 1]
+                        else:
+                            print_error("Invalid choice")
+                            return True
+                    except ValueError:
+                        print_error("Please enter a number")
+                        return True
     provider = providers.get_provider(selected_provider)
 
-    # Translate all
-    print()
-    print_info(f"Translating release notes for {len(target_locales)} locales...")
+    # Pick a per-run seed reused across locales
+    seed = random.randint(1, 2**31 - 1)
+
+    # Translate + review loop
     limit = get_field_limit("whats_new") or 4000
     translations: Dict[str, str] = {}
-    last_len = 0
-    for i, loc in enumerate(target_locales, 1):
-        language = APP_STORE_LOCALES.get(loc, loc)
-        try:
-            line = format_progress(i, len(target_locales), f"Translating {language}")
-            pad = max(0, last_len - len(line))
-            sys.stdout.write("\r" + line + (" " * pad))
-            sys.stdout.flush()
-            last_len = len(line)
-        except Exception:
-            print(format_progress(i, len(target_locales), f"Translating {language}"))
-        try:
-            txt = provider.translate(text=source_notes, target_language=language, max_length=limit, is_keywords=False)
+    while True:
+        # Show provider/model and source preview
+        show_provider_and_source(provider, selected_provider, base_locale, source_notes, title="Source release notes to translate", seed=seed)
+
+        # Parallel translate all
+        def _task(loc: str) -> str:
+            language = APP_STORE_LOCALES.get(loc, loc)
+            txt = provider.translate(text=source_notes, target_language=language, max_length=limit, is_keywords=False, seed=seed)
             txt = (txt or "").strip()
             if len(txt) > limit:
                 txt = txt[:limit]
-            translations[loc] = txt
-            time.sleep(1)
-        except Exception as e:
-            print_error(f"  ❌ Failed to translate {language}: {str(e)}")
-            translations[loc] = ""
-            continue
-    try:
-        sys.stdout.write("\r" + (" " * last_len) + "\r")
-        sys.stdout.flush()
-    except Exception:
-        pass
-    print()
+            return txt
 
-    # Preview
-    print_info("Preview generated release notes:")
-    for loc in target_locales:
-        language = APP_STORE_LOCALES.get(loc, loc)
-        print("-" * 60)
-        print(f"{language} [{loc}]")
-        print("-" * 60)
-        print(translations.get(loc, ""))
-        print()
+        translations, _errs = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=1.0)
 
-    # Edit selection
-    if ui.available():
-        choice = ui.select(
-            "Next step",
-            [
-                {"name": "Apply all now", "value": "apply"},
-                {"name": "Edit selected locales", "value": "edit"},
-                {"name": "Cancel", "value": "cancel"},
-            ], add_back=True,
-        )
-        if choice is None or choice == "cancel":
-            print_info("Cancelled")
-            return True
-        do_edit = (choice == "edit")
-    else:
-        raw = input("Apply all (a) / Edit (e) / Cancel (c): ").strip().lower()
-        if raw == 'c':
-            print_info("Cancelled")
-            return True
-        do_edit = (raw == 'e')
+        # Preview
+        print_info("Preview generated release notes:")
+        for loc in target_locales:
+            language = APP_STORE_LOCALES.get(loc, loc)
+            print("-" * 60)
+            print(f"{language} [{loc}]")
+            print("-" * 60)
+            txt = translations.get(loc, "")
+            print(txt)
+            if not (txt or "").strip():
+                print_warning(f"Empty translation for {language} [{loc}]")
+            print()
 
-    if do_edit:
+        # Next step selection (apply / edit locales / re-enter source / cancel)
+        do_edit = False
         if ui.available():
-            choices = [{"name": f"{APP_STORE_LOCALES.get(loc, loc)} [{loc}]", "value": loc} for loc in target_locales]
-            to_edit = ui.checkbox("Select locales to edit", choices, add_back=True)
-            if to_edit:
-                for loc in to_edit:
-                    language = APP_STORE_LOCALES.get(loc, loc)
-                    edited = ui.prompt_multiline(f"Edit release notes for {language} (END with 'EOF'):", initial=translations.get(loc, ""))
-                    if edited is not None:
-                        edited = edited.strip()
-                        if len(edited) > limit:
-                            edited = edited[:limit]
-                        translations[loc] = edited
+            choice = ui.select(
+                "Next step",
+                [
+                    {"name": "Apply all now", "value": "apply"},
+                    {"name": "Edit selected locales", "value": "edit"},
+                    {"name": "Re-enter source notes and re-translate", "value": "reenter"},
+                    {"name": "Cancel", "value": "cancel"},
+                ], add_back=True,
+            )
+            if choice is None or choice == "cancel":
+                print_info("Cancelled")
+                return True
+            if choice == "reenter":
+                new_notes = ui.prompt_multiline("Enter new source release notes (END with 'EOF'):", initial=source_notes)
+                if not new_notes:
+                    print_warning("No content entered; keeping previous source notes.")
+                else:
+                    source_notes = new_notes
+                # Loop to re-translate
+                continue
+            do_edit = (choice == "edit")
         else:
-            raw = input("Enter locales to edit (comma-separated) or Enter to skip: ").strip()
-            if raw:
-                for loc in [s.strip() for s in raw.split(',') if s.strip() in target_locales]:
-                    language = APP_STORE_LOCALES.get(loc, loc)
-                    edited = ui.prompt_multiline(f"Edit release notes for {language} (END with 'EOF'):", initial=translations.get(loc, ""))
-                    if edited is not None:
-                        edited = edited.strip()
-                        if len(edited) > limit:
-                            edited = edited[:limit]
-                        translations[loc] = edited
+            raw = input("Apply all (a) / Edit (e) / Re-enter source (r) / Cancel (c): ").strip().lower()
+            if raw == 'c':
+                print_info("Cancelled")
+                return True
+            if raw == 'r':
+                new_notes = ui.prompt_multiline("Enter new source release notes (END with 'EOF'):", initial=source_notes)
+                if not new_notes:
+                    print_warning("No content entered; keeping previous source notes.")
+                else:
+                    source_notes = new_notes
+                # Loop to re-translate
+                continue
+            do_edit = (raw == 'e')
+
+        # Optional per-locale edits, then break to confirmation/apply
+        if do_edit:
+            if ui.available():
+                choices = [{"name": f"{APP_STORE_LOCALES.get(loc, loc)} [{loc}]", "value": loc} for loc in target_locales]
+                to_edit = ui.checkbox("Select locales to edit", choices, add_back=True)
+                if to_edit:
+                    for loc in to_edit:
+                        language = APP_STORE_LOCALES.get(loc, loc)
+                        edited = ui.prompt_multiline(f"Edit release notes for {language} (END with 'EOF'):", initial=translations.get(loc, ""))
+                        if edited is not None:
+                            edited = edited.strip()
+                            if len(edited) > limit:
+                                edited = edited[:limit]
+                            translations[loc] = edited
+            else:
+                raw = input("Enter locales to edit (comma-separated) or Enter to skip: ").strip()
+                if raw:
+                    for loc in [s.strip() for s in raw.split(',') if s.strip() in target_locales]:
+                        language = APP_STORE_LOCALES.get(loc, loc)
+                        edited = ui.prompt_multiline(f"Edit release notes for {language} (END with 'EOF'):", initial=translations.get(loc, ""))
+                        if edited is not None:
+                            edited = edited.strip()
+                            if len(edited) > limit:
+                                edited = edited[:limit]
+                            translations[loc] = edited
+
+        # Break out to confirmation/apply
+        break
 
     # Confirm
     proceed = ui.confirm("Apply release notes to all listed locales?", True)
@@ -397,4 +424,3 @@ def run(cli) -> bool:
 
     input("\nPress Enter to continue...")
     return True
-

@@ -9,7 +9,14 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 import requests
 import os
-from ai_logger import log_ai_request, log_ai_response, log_character_limit_retry
+import time
+from ai_logger import (
+    log_ai_request,
+    log_ai_response,
+    log_character_limit_retry,
+    log_ai_http_error,
+    log_ai_error,
+)
 
 
 class AIProvider(ABC):
@@ -18,7 +25,8 @@ class AIProvider(ABC):
     @abstractmethod
     def translate(self, text: str, target_language: str, 
                   max_length: Optional[int] = None, 
-                  is_keywords: bool = False) -> str:
+                  is_keywords: bool = False,
+                  seed: Optional[int] = None) -> str:
         """
         Translate text to target language.
         
@@ -27,10 +35,10 @@ class AIProvider(ABC):
             target_language: Target language name
             max_length: Maximum character length for translation
             is_keywords: Whether the text is keywords (affects formatting)
-            
-        Returns:
-            Translated text
-        """
+            seed: Optional deterministic seed reused across locales
+            Returns:
+                Translated text
+            """
         pass
     
     @abstractmethod
@@ -46,12 +54,13 @@ class AnthropicProvider(AIProvider):
         self.api_key = api_key
         self.model = model
     
-    def translate(self, text: str, target_language: str, 
-                  max_length: Optional[int] = None, 
-                  is_keywords: bool = False) -> str:
+    def translate(self, text: str, target_language: str,
+                  max_length: Optional[int] = None,
+                  is_keywords: bool = False,
+                  seed: Optional[int] = None) -> str:
         """Translate using Anthropic Claude."""
         # Log the request
-        log_ai_request("Anthropic Claude", self.model, text, target_language, max_length, is_keywords)
+        log_ai_request("Anthropic Claude", self.model, text, target_language, max_length, is_keywords, seed)
         
         try:
             url = "https://api.anthropic.com/v1/messages"
@@ -88,9 +97,45 @@ class AnthropicProvider(AIProvider):
                     {"role": "user", "content": text}
                 ]
             }
+            if seed is not None:
+                data["metadata"] = {"seed": str(seed)}
             
+            start = time.monotonic()
             response = requests.post(url, headers=headers, json=data)
-            response.raise_for_status()
+            duration_ms = int((time.monotonic() - start) * 1000)
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as http_err:
+                rid = response.headers.get('x-request-id') or response.headers.get('request-id') or response.headers.get('X-Request-Id')
+                err_code = None
+                err_type = None
+                resp_text = None
+                try:
+                    resp_text = response.text
+                    j = response.json()
+                    # Anthropic error shape: {"error": {"type": "...", "message": "..."}}
+                    if isinstance(j, dict) and 'error' in j:
+                        err = j.get('error') or {}
+                        err_type = err.get('type')
+                        err_code = err.get('code') or err.get('type')
+                        msg = err.get('message') or str(http_err)
+                        resp_text = msg
+                except Exception:
+                    pass
+                log_ai_http_error(
+                    provider="Anthropic Claude",
+                    endpoint=url,
+                    status_code=response.status_code,
+                    request_id=rid,
+                    error_code=err_code,
+                    error_type=err_type,
+                    response_excerpt=resp_text,
+                    duration_ms=duration_ms,
+                    model=self.model,
+                    headers_excerpt={k: v for k, v in response.headers.items() if k.lower() in ("x-request-id", "ratelimit-remaining", "ratelimit-reset")},
+                )
+                log_ai_response("Anthropic Claude", "", success=False, error=str(http_err))
+                raise
             
             response_data = response.json()
             
@@ -116,8 +161,11 @@ class AnthropicProvider(AIProvider):
             log_ai_response("Anthropic Claude", translated_text, success=True)
             return translated_text.strip()
             
+        except requests.exceptions.HTTPError as e:
+            # Already logged above; rethrow with clearer message
+            raise Exception(f"Anthropic API error {e.response.status_code}: {e}")
         except Exception as e:
-            # Log error response
+            log_ai_error("Anthropic Claude", "Unhandled error during translation", {"error": str(e), "model": self.model})
             log_ai_response("Anthropic Claude", "", success=False, error=str(e))
             raise Exception(f"Anthropic translation failed: {str(e)}")
     
@@ -132,12 +180,13 @@ class OpenAIProvider(AIProvider):
         self.api_key = api_key
         self.model = model
     
-    def translate(self, text: str, target_language: str, 
-                  max_length: Optional[int] = None, 
-                  is_keywords: bool = False) -> str:
+    def translate(self, text: str, target_language: str,
+                  max_length: Optional[int] = None,
+                  is_keywords: bool = False,
+                  seed: Optional[int] = None) -> str:
         """Translate using OpenAI GPT."""
         # Log the request
-        log_ai_request("OpenAI GPT", self.model, text, target_language, max_length, is_keywords)
+        log_ai_request("OpenAI GPT", self.model, text, target_language, max_length, is_keywords, seed)
         
         try:
             url = "https://api.openai.com/v1/chat/completions"
@@ -150,7 +199,7 @@ class OpenAIProvider(AIProvider):
             system_message = (
                 f"You are a professional translator specializing in App Store metadata translation. "
                 f"Translate the following text to {target_language}. "
-                f"Maintain the marketing tone and style of the original text."
+                f"Maintain the marketing tone, formatting and style of the original text."
             )
             
             if is_keywords:
@@ -158,11 +207,7 @@ class OpenAIProvider(AIProvider):
             
             if max_length:
                 system_message += (
-                    f" CRITICAL: Your translation MUST be EXACTLY {max_length} characters or fewer "
-                    f"INCLUDING ALL SPACES, PUNCTUATION, AND SPECIAL CHARACTERS. Count every single "
-                    f"character including spaces between words. Do not add ellipsis (...) at the end. "
-                    f"Create a concise but meaningful translation that captures the essence of the "
-                    f"original message while staying within the character limit."
+                    f" Create a concise but meaningful translation that captures the essence of the original message."
                 )
             
             data = {
@@ -171,12 +216,67 @@ class OpenAIProvider(AIProvider):
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": text}
                 ],
-                "max_tokens": 1000,
-                "temperature": 0.7
+                "max_completion_tokens" if self.model.startswith("gpt-5") else "max_tokens": 1000,
+                "temperature": 1.0 if self.model.startswith("gpt-5") else 0.7
             }
+            if seed is not None:
+                # Some models may reject seed; we'll retry without it if needed
+                data["seed"] = seed
             
-            response = requests.post(url, headers=headers, json=data)
-            response.raise_for_status()
+            # Send with optional one-time retry without seed if unsupported
+            def _send(current_data):
+                start = time.monotonic()
+                resp = requests.post(url, headers=headers, json=current_data)
+                dur = int((time.monotonic() - start) * 1000)
+                return resp, dur
+
+            response, duration_ms = _send(data)
+            if response.status_code >= 400 and seed is not None:
+                # Check if error mentions seed and retry once without it
+                try:
+                    j = response.json()
+                    msg = (j.get('error', {}) or {}).get('message', '')
+                except Exception:
+                    msg = response.text or ''
+                if 'seed' in (msg or '').lower():
+                    # Log and retry without seed
+                    log_ai_error("OpenAI GPT", "Retrying without seed due to model not supporting it", {"model": self.model, "status": response.status_code, "message": msg})
+                    data.pop("seed", None)
+                    response, duration_ms = _send(data)
+
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as http_err:
+                rid = response.headers.get('x-request-id') or response.headers.get('request-id') or response.headers.get('X-Request-Id')
+                err_code = None
+                err_type = None
+                resp_text = None
+                try:
+                    resp_text = response.text
+                    j = response.json()
+                    # OpenAI error shape: {"error": {"type": "invalid_request_error", "message": "...", "code": "..."}}
+                    if isinstance(j, dict) and 'error' in j:
+                        err = j.get('error') or {}
+                        err_type = err.get('type')
+                        err_code = err.get('code')
+                        msg = err.get('message') or str(http_err)
+                        resp_text = msg
+                except Exception:
+                    pass
+                log_ai_http_error(
+                    provider="OpenAI GPT",
+                    endpoint=url,
+                    status_code=response.status_code,
+                    request_id=rid,
+                    error_code=err_code,
+                    error_type=err_type,
+                    response_excerpt=resp_text,
+                    duration_ms=duration_ms,
+                    model=self.model,
+                    headers_excerpt={k: v for k, v in response.headers.items() if k.lower() in ("x-request-id", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests")},
+                )
+                log_ai_response("OpenAI GPT", "", success=False, error=str(http_err))
+                raise
             
             response_data = response.json()
             
@@ -202,8 +302,10 @@ class OpenAIProvider(AIProvider):
             log_ai_response("OpenAI GPT", translated_text, success=True)
             return translated_text.strip()
             
+        except requests.exceptions.HTTPError as e:
+            raise Exception(f"OpenAI API error {e.response.status_code}: {e}")
         except Exception as e:
-            # Log error response
+            log_ai_error("OpenAI GPT", "Unhandled error during translation", {"error": str(e), "model": self.model})
             log_ai_response("OpenAI GPT", "", success=False, error=str(e))
             raise Exception(f"OpenAI translation failed: {str(e)}")
     
@@ -218,12 +320,13 @@ class GoogleGeminiProvider(AIProvider):
         self.api_key = api_key
         self.model = model
     
-    def translate(self, text: str, target_language: str, 
-                  max_length: Optional[int] = None, 
-                  is_keywords: bool = False) -> str:
+    def translate(self, text: str, target_language: str,
+                  max_length: Optional[int] = None,
+                  is_keywords: bool = False,
+                  seed: Optional[int] = None) -> str:
         """Translate using Google Gemini."""
         # Log the request
-        log_ai_request("Google Gemini", self.model, text, target_language, max_length, is_keywords)
+        log_ai_request("Google Gemini", self.model, text, target_language, max_length, is_keywords, seed)
         
         try:
             url = f"https://generativelanguage.googleapis.com/v1/models/{self.model}:generateContent?key={self.api_key}"
@@ -263,9 +366,72 @@ class GoogleGeminiProvider(AIProvider):
                     "maxOutputTokens": 8000
                 }
             }
+            if seed is not None:
+                try:
+                    data["generationConfig"]["seed"] = int(seed)
+                except Exception:
+                    pass
             
-            response = requests.post(url, headers=headers, json=data)
-            response.raise_for_status()
+            def _send(current_data):
+                start = time.monotonic()
+                resp = requests.post(url, headers=headers, json=current_data)
+                dur = int((time.monotonic() - start) * 1000)
+                return resp, dur
+
+            response, duration_ms = _send(data)
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as http_err:
+                rid = response.headers.get('x-request-id') or response.headers.get('request-id') or response.headers.get('X-Request-Id')
+                err_code = None
+                err_type = None
+                resp_text = None
+                try:
+                    resp_text = response.text
+                    j = response.json()
+                    # Gemini error shape: {"error": {"status": "...", "message": "...", "code": 400}}
+                    if isinstance(j, dict) and 'error' in j:
+                        err = j.get('error') or {}
+                        err_type = err.get('status')
+                        err_code = str(err.get('code')) if err.get('code') is not None else None
+                        msg = err.get('message') or str(http_err)
+                        resp_text = msg
+                except Exception:
+                    pass
+                # Retry once without seed if unsupported
+                if seed is not None and (resp_text or '').lower().find('seed') != -1 and isinstance(data.get('generationConfig'), dict):
+                    log_ai_error("Google Gemini", "Retrying without seed due to model not supporting it", {"model": self.model, "status": response.status_code, "message": resp_text})
+                    try:
+                        data['generationConfig'].pop('seed', None)
+                    except Exception:
+                        pass
+                    response, duration_ms = _send(data)
+                    try:
+                        response.raise_for_status()
+                    except requests.exceptions.HTTPError:
+                        # fall through to log below
+                        pass
+                    else:
+                        # Success on retry; continue processing
+                        resp_text = None
+                        err_code = None
+                        err_type = None
+                        http_err = None  # type: ignore
+                if response.status_code >= 400:
+                    log_ai_http_error(
+                        provider="Google Gemini",
+                        endpoint=url,
+                        status_code=response.status_code,
+                        request_id=rid,
+                        error_code=err_code,
+                        error_type=err_type,
+                        response_excerpt=resp_text,
+                        duration_ms=duration_ms,
+                        model=self.model,
+                        headers_excerpt={k: v for k, v in response.headers.items() if k.lower() in ("x-request-id", "x-ratelimit-limit", "x-ratelimit-remaining")},
+                    )
+                    log_ai_response("Google Gemini", "", success=False, error=str(http_err))
+                    raise
             
             response_data = response.json()
             
@@ -299,8 +465,10 @@ class GoogleGeminiProvider(AIProvider):
             log_ai_response("Google Gemini", translated_text, success=True)
             return translated_text.strip()
             
+        except requests.exceptions.HTTPError as e:
+            raise Exception(f"Google Gemini API error {e.response.status_code}: {e}")
         except Exception as e:
-            # Log error response
+            log_ai_error("Google Gemini", "Unhandled error during translation", {"error": str(e), "model": self.model})
             log_ai_response("Google Gemini", "", success=False, error=str(e))
             raise Exception(f"Google Gemini translation failed: {str(e)}")
     
