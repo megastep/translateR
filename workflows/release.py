@@ -5,7 +5,6 @@ Release Mode workflow: create and translate What's New notes, multi-platform.
 from typing import Dict, List, Optional
 import sys
 import time
-import random
 
 from utils import APP_STORE_LOCALES, get_field_limit, format_progress, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source, build_refinement_template, parse_refinement_template
 
@@ -268,8 +267,8 @@ def run(cli) -> bool:
                         return True
     provider = providers.get_provider(selected_provider)
 
-    # Pick a per-run seed reused across locales
-    seed = random.randint(1, 2**31 - 1)
+    # Use session-wide seed
+    seed = getattr(cli, 'session_seed', None)
 
     # Translate + review loop
     limit = get_field_limit("whats_new") or 4000

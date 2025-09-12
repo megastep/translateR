@@ -4,7 +4,6 @@ Full Setup Mode: translate missing languages across selected platforms.
 
 from typing import Dict
 import time
-import random
 
 from utils import (
     APP_STORE_LOCALES, detect_base_language, get_field_limit, truncate_keywords,
@@ -135,7 +134,7 @@ def run(cli) -> bool:
     refine_phrase = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
     # Show provider/model and choose seed
     pname, pmodel = provider_model_info(provider, selected_provider)
-    seed = random.randint(1, 2**31 - 1)
+    seed = getattr(cli, 'session_seed', None)
     print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
 
     print_info(f"Starting full setup for {len(target_locales)} languages across {len(selected)} platform(s)...")

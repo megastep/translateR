@@ -12,6 +12,7 @@ Repository: https://github.com/emreertunc/translater
 
 import sys
 import os
+import random
 import time
 import random
 import re
@@ -47,6 +48,8 @@ class TranslateRCLI:
         self.asc_client = None
         self.ai_manager = AIProviderManager()
         self.ui = UI()
+        # Session-wide random seed reused across all translations
+        self.session_seed = random.randint(1, 2**31 - 1)
         self.setup_ai_providers()
     
     def setup_ai_providers(self):
@@ -361,8 +364,6 @@ class TranslateRCLI:
                 print(f"📝 Subtitle: {base_subtitle}")
             
             success_count = 0
-            # Pick a per-run seed reused across locales
-            seed = random.randint(1, 2**31 - 1)
             
             for i, target_locale in enumerate(target_locales, 1):
                 language_name = APP_STORE_LOCALES.get(target_locale, target_locale)
@@ -379,7 +380,7 @@ class TranslateRCLI:
                             base_name,
                             language_name,
                             max_length=30,
-                            seed=seed
+                            seed=self.session_seed
                         )
                         if len(translated_name) > 30:
                             translated_name = translated_name[:30]
@@ -392,7 +393,7 @@ class TranslateRCLI:
                             base_subtitle,
                             language_name,
                             max_length=30,
-                            seed=seed
+                            seed=self.session_seed
                         )
                         if len(translated_subtitle) > 30:
                             translated_subtitle = translated_subtitle[:30]
