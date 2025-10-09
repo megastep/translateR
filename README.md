@@ -92,7 +92,7 @@ Concurrency (advanced):
 - Set a global translation guidance phrase: in the CLI, open “⚙️  Configuration” → “Set translation prompt refinement”.
 - During workflows, you can enter a per-run refinement phrase; the tool appends it to the system/prompt sent to the AI.
 
-## 7 Main Workflows
+## 8 Main Workflows
 
 ### 1. 🌐 Translation Mode
 
@@ -109,6 +109,7 @@ Concurrency (advanced):
 
 - Select one or multiple platforms (iOS, macOS, tvOS, visionOS)
 - Detects locales missing release notes and selects them by default
+- Pull from reusable presets (built-in or custom) for frequently used notes
 - Enter or edit source notes (English) if missing, or reuse base notes
 - Batch-translates all target locales, shows a full preview, lets you edit per-locale, then applies updates per platform
 - If you're not happy with the results, re‑enter the source release notes and re‑translate before applying (available in both TUI and non‑TUI flows)
@@ -156,6 +157,14 @@ Concurrency (advanced):
 - Complete backup with all metadata fields
 - Creates organized JSON export with app details
 
+### 8. 🗂️ Manage Presets
+
+**Use when**: Maintaining reusable release note snippets
+
+- Browse the built-in preset library and your custom additions
+- Create new presets from an English note; TranslateR generates translations for every App Store locale automatically
+- Remove presets you no longer need (built-in presets are read-only)
+
 ## Supported Fields & Languages
 
 **Fields**: Description (4000 chars), Keywords (100 chars), Promotional Text (170 chars), What's New (4000 chars), App Name (30 chars), Subtitle (30 chars)
@@ -169,11 +178,15 @@ $ python3 main.py
 
 TranslateR - App Store Localization Tool
 1. 🌐 Translation Mode
-2. 🔄 Update Mode  
-3. 📋 Copy Mode
-4. 🚀 Full Setup Mode
-5. 📱 App Name & Subtitle Mode
-6. 📄 Export Localizations
+2. 📝 Release Mode
+3. 🔄 Update Mode
+4. 📋 Copy Mode
+5. 🚀 Full Setup Mode
+6. 📱 App Name & Subtitle Mode
+7. 📄 Export Localizations
+8. 🗂️ Manage Presets
+9. ⚙️  Configuration
+10. ❌ Exit
 
 Choose: 1
 

@@ -28,6 +28,7 @@ from workflows.copy import run as copy_run
 from workflows.full_setup import run as full_setup_run
 from workflows.app_info import run as app_info_run
 from workflows.export_localizations import run as export_run
+from workflows.manage_presets import run as manage_presets_run
 
 from config import ConfigManager
 from app_store_client import AppStoreConnectClient
@@ -274,8 +275,9 @@ class TranslateRCLI:
                 {"name": "🚀 Full Setup Mode - Complete localization setup", "value": "5"},
                 {"name": "📱 App Name & Subtitle Mode - Translate app name and subtitle", "value": "6"},
                 {"name": "📄 Export Localizations - Export existing localizations to file", "value": "7"},
-                {"name": "⚙️  Configuration - Manage API keys and settings", "value": "8"},
-                {"name": "❌ Exit", "value": "9"},
+                {"name": "🗂️ Manage Presets - Create and organize release note presets", "value": "8"},
+                {"name": "⚙️  Configuration - Manage API keys and settings", "value": "9"},
+                {"name": "❌ Exit", "value": "10"},
             ]
             choice = self.ui.select("TranslateR — Choose your workflow", choices) or ""
         else:
@@ -288,10 +290,11 @@ class TranslateRCLI:
             print("5. 🚀 Full Setup Mode - Complete localization setup")
             print("6. 📱 App Name & Subtitle Mode - Translate app name and subtitle")
             print("7. 📄 Export Localizations - Export existing localizations to file")
-            print("8. ⚙️  Configuration - Manage API keys and settings")
-            print("9. ❌ Exit")
+            print("8. 🗂️ Manage Presets - Create and organize release note presets")
+            print("9. ⚙️  Configuration - Manage API keys and settings")
+            print("10. ❌ Exit")
             print()
-            choice = input("Select an option (1-9): ").strip()
+            choice = input("Select an option (1-10): ").strip()
 
         if choice == "1":
             return translate_run(self)
@@ -308,12 +311,14 @@ class TranslateRCLI:
         elif choice == "7":
             return export_run(self)
         elif choice == "8":
-            return self.configuration_mode()
+            return manage_presets_run(self)
         elif choice == "9":
+            return self.configuration_mode()
+        elif choice == "10":
             print_info("Thank you for using TranslateR!")
             return False
         else:
-            print_error("Invalid choice. Please select 1-9.")
+            print_error("Invalid choice. Please select 1-10.")
             return True
     
     def translation_mode(self):

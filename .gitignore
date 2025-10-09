@@ -13,6 +13,7 @@ existing_localizations/
 # Generated config files
 config/providers.json
 config/instructions.txt
+config/presets/
 
 # Python
 __pycache__/
