@@ -4,12 +4,11 @@ Release Mode workflow: create and translate What's New notes, multi-platform.
 
 from typing import Dict, List, Optional, Tuple
 import sys
-import time
 import textwrap
 
 from release_presets import list_presets, ReleaseNotePreset
 
-from utils import APP_STORE_LOCALES, get_field_limit, format_progress, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source, build_refinement_template, parse_refinement_template
+from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source, build_refinement_template, parse_refinement_template
 
 
 def _preset_preview_text(preset: ReleaseNotePreset, base_locale: str) -> str:
@@ -613,33 +612,27 @@ def run(cli) -> bool:
             except Exception as e:
                 print_warning(f"  Could not update base locale: {str(e)}")
 
-        total = len(target_locales)
-        last_len = 0
-        for i, loc in enumerate(target_locales, 1):
-            if loc not in empty_by_platform.get(plat, []):
-                continue
-            language = APP_STORE_LOCALES.get(loc, loc)
-            try:
-                line = format_progress(i, total, f"Updating {language} ({plat_name})")
-                pad = max(0, last_len - len(line))
-                sys.stdout.write("\r" + line + (" " * pad))
-                sys.stdout.flush()
-                last_len = len(line)
-            except Exception:
-                print(format_progress(i, total, f"Updating {language} ({plat_name})"))
-            try:
-                asc.update_app_store_version_localization(localization_id=locale_map[loc]["id"], whats_new=translations.get(loc, ""))
-                success += 1
-                time.sleep(1)
-            except Exception as e:
-                print_error(f"  ❌ Failed to update {language} ({plat_name}): {str(e)}")
-                continue
-        try:
-            sys.stdout.write("\r" + (" " * last_len) + "\r")
-            sys.stdout.flush()
-        except Exception:
-            pass
-        print()
+        apply_locales = [loc for loc in target_locales if loc in locales_for_platform]
+        if apply_locales:
+            def _apply(loc: str) -> bool:
+                asc.update_app_store_version_localization(
+                    localization_id=locale_map[loc]["id"],
+                    whats_new=translations.get(loc, ""),
+                )
+                return True
+
+            updated, errors = parallel_map_locales(
+                apply_locales,
+                _apply,
+                progress_action=f"Updating {plat_name}",
+                pacing_seconds=0.0,
+            )
+            success += len(updated)
+            # Errors already logged inside parallel_map_locales; ensure blank line for readability.
+            if errors:
+                print()
+        else:
+            print()
         print_success(f"{plat_name}: {success}/{total_to_update} locale{'s' if total_to_update != 1 else ''} updated")
 
     # Verify (best effort)
