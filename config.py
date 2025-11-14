@@ -62,7 +62,7 @@ class ConfigManager:
                 "name": "OpenAI GPT",
                 "class": "OpenAIProvider", 
                 "models": [
-                    "gpt-5",
+                    "gpt-5.1",
                     "gpt-5-mini", 
                     "gpt-5-nano",
                     "gpt-5-chat-latest",
@@ -76,7 +76,7 @@ class ConfigManager:
                     "gpt-4",
                     "gpt-3.5-turbo"
                 ],
-                "default_model": "gpt-5"
+                "default_model": "gpt-5.1"
             },
             "google": {
                 "name": "Google Gemini",

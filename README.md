@@ -92,7 +92,7 @@ Concurrency (advanced):
 - Set a global translation guidance phrase: in the CLI, open “⚙️  Configuration” → “Set translation prompt refinement”.
 - During workflows, you can enter a per-run refinement phrase; the tool appends it to the system/prompt sent to the AI.
 
-## 8 Main Workflows
+## 9 Main Workflows
 
 ### 1. 🌐 Translation Mode
 
@@ -116,7 +116,17 @@ Concurrency (advanced):
 - Editing opens your system editor (`$VISUAL`/`$EDITOR`) when available; otherwise a simple inline editor is provided
 - Updates the base locale if it's empty for a chosen platform
 
-### 3. 🔄 Update Mode
+### 3. ✨ Promo Mode
+
+**Use when**: Refreshing Promotional Text for every locale at once
+
+- Pick the platforms you want to update; TranslateR loads every existing localization automatically
+- Reuse the base promotional text, edit it inline, or enter a brand-new 170‑character message
+- Translate that source text into every selected locale (even ones that already had promotional text) and preview all results
+- Edit any locale manually before applying, or re-enter the source text and re-run translations until you're happy
+- Applies updates to every platform in one pass, including the base locale, so your worldwide marketing message stays in sync
+
+### 4. 🔄 Update Mode
 
 **Use when**: Updating existing translations (e.g., new "What's New" content)
 
@@ -124,7 +134,7 @@ Concurrency (advanced):
 - Choose which languages and fields to update
 - Perfect for version updates
 
-### 4. 📋 Copy Mode
+### 5. 📋 Copy Mode
 
 **Use when**: New app version with similar content
 
@@ -132,7 +142,7 @@ Concurrency (advanced):
 - No translation needed
 - Fast setup for new versions
 
-### 5. 🚀 Full Setup Mode  
+### 6. 🚀 Full Setup Mode  
 
 **Use when**: Complete localization for new apps
 
@@ -140,7 +150,7 @@ Concurrency (advanced):
 - Maximum global reach
 - One-command setup
 
-### 6. 📱 App Name & Subtitle Mode
+### 7. 📱 App Name & Subtitle Mode
 
 **Use when**: Translating app name and subtitle
 
@@ -148,7 +158,7 @@ Concurrency (advanced):
 - 30-character limits enforced
 - Brand-focused translations
 
-### 7. 📄 Export Localizations
+### 8. 📄 Export Localizations
 
 **Use when**: Backing up or analyzing existing localizations
 
@@ -157,7 +167,7 @@ Concurrency (advanced):
 - Complete backup with all metadata fields
 - Creates organized JSON export with app details
 
-### 8. 🗂️ Manage Presets
+### 9. 🗂️ Manage Presets
 
 **Use when**: Maintaining reusable release note snippets
 
@@ -179,14 +189,15 @@ $ python3 main.py
 TranslateR - App Store Localization Tool
 1. 🌐 Translation Mode
 2. 📝 Release Mode
-3. 🔄 Update Mode
-4. 📋 Copy Mode
-5. 🚀 Full Setup Mode
-6. 📱 App Name & Subtitle Mode
-7. 📄 Export Localizations
-8. 🗂️ Manage Presets
-9. ⚙️  Configuration
-10. ❌ Exit
+3. ✨ Promo Mode
+4. 🔄 Update Mode
+5. 📋 Copy Mode
+6. 🚀 Full Setup Mode
+7. 📱 App Name & Subtitle Mode
+8. 📄 Export Localizations
+9. 🗂️ Manage Presets
+10. ⚙️  Configuration
+11. ❌ Exit
 
 Choose: 1
 

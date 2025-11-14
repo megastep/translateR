@@ -22,6 +22,7 @@ from pathlib import Path
 # Modularized UI and workflows
 from ui import UI
 from workflows.release import run as release_run
+from workflows.promo import run as promo_run
 from workflows.translate import run as translate_run
 from workflows.update_localizations import run as update_run
 from workflows.copy import run as copy_run
@@ -270,14 +271,15 @@ class TranslateRCLI:
             choices = [
                 {"name": "🌐 Translation Mode - Translate to new languages", "value": "1"},
                 {"name": "📝 Release Mode - Create release notes for new version", "value": "2"},
-                {"name": "🔄 Update Mode - Update existing localizations", "value": "3"},
-                {"name": "📋 Copy Mode - Copy from previous version", "value": "4"},
-                {"name": "🚀 Full Setup Mode - Complete localization setup", "value": "5"},
-                {"name": "📱 App Name & Subtitle Mode - Translate app name and subtitle", "value": "6"},
-                {"name": "📄 Export Localizations - Export existing localizations to file", "value": "7"},
-                {"name": "🗂️ Manage Presets - Create and organize release note presets", "value": "8"},
-                {"name": "⚙️  Configuration - Manage API keys and settings", "value": "9"},
-                {"name": "❌ Exit", "value": "10"},
+                {"name": "✨ Promo Mode - Update promotional text across locales", "value": "3"},
+                {"name": "🔄 Update Mode - Update existing localizations", "value": "4"},
+                {"name": "📋 Copy Mode - Copy from previous version", "value": "5"},
+                {"name": "🚀 Full Setup Mode - Complete localization setup", "value": "6"},
+                {"name": "📱 App Name & Subtitle Mode - Translate app name and subtitle", "value": "7"},
+                {"name": "📄 Export Localizations - Export existing localizations to file", "value": "8"},
+                {"name": "🗂️ Manage Presets - Create and organize release note presets", "value": "9"},
+                {"name": "⚙️  Configuration - Manage API keys and settings", "value": "10"},
+                {"name": "❌ Exit", "value": "11"},
             ]
             choice = self.ui.select("TranslateR — Choose your workflow", choices) or ""
         else:
@@ -285,40 +287,43 @@ class TranslateRCLI:
             print("🌍 TranslateR - Choose your workflow:")
             print("1. 🌐 Translation Mode - Translate to new languages")
             print("2. 📝 Release Mode - Create release notes for new version")
-            print("3. 🔄 Update Mode - Update existing localizations")
-            print("4. 📋 Copy Mode - Copy from previous version") 
-            print("5. 🚀 Full Setup Mode - Complete localization setup")
-            print("6. 📱 App Name & Subtitle Mode - Translate app name and subtitle")
-            print("7. 📄 Export Localizations - Export existing localizations to file")
-            print("8. 🗂️ Manage Presets - Create and organize release note presets")
-            print("9. ⚙️  Configuration - Manage API keys and settings")
-            print("10. ❌ Exit")
+            print("3. ✨ Promo Mode - Update promotional text across locales")
+            print("4. 🔄 Update Mode - Update existing localizations")
+            print("5. 📋 Copy Mode - Copy from previous version") 
+            print("6. 🚀 Full Setup Mode - Complete localization setup")
+            print("7. 📱 App Name & Subtitle Mode - Translate app name and subtitle")
+            print("8. 📄 Export Localizations - Export existing localizations to file")
+            print("9. 🗂️ Manage Presets - Create and organize release note presets")
+            print("10. ⚙️  Configuration - Manage API keys and settings")
+            print("11. ❌ Exit")
             print()
-            choice = input("Select an option (1-10): ").strip()
+            choice = input("Select an option (1-11): ").strip()
 
         if choice == "1":
             return translate_run(self)
         elif choice == "2":
             return release_run(self)
         elif choice == "3":
-            return update_run(self)
+            return promo_run(self)
         elif choice == "4":
-            return copy_run(self)
+            return update_run(self)
         elif choice == "5":
-            return full_setup_run(self)
+            return copy_run(self)
         elif choice == "6":
-            return app_info_run(self)
+            return full_setup_run(self)
         elif choice == "7":
-            return export_run(self)
+            return app_info_run(self)
         elif choice == "8":
-            return manage_presets_run(self)
+            return export_run(self)
         elif choice == "9":
-            return self.configuration_mode()
+            return manage_presets_run(self)
         elif choice == "10":
+            return self.configuration_mode()
+        elif choice == "11":
             print_info("Thank you for using TranslateR!")
             return False
         else:
-            print_error("Invalid choice. Please select 1-10.")
+            print_error("Invalid choice. Please select 1-11.")
             return True
     
     def translation_mode(self):
