@@ -5,10 +5,58 @@ Handles loading and saving of configuration files including API keys,
 provider settings, and user preferences.
 """
 
+import copy
 import json
 import os
 from typing import Dict, Any, Optional
 from pathlib import Path
+
+DEFAULT_PROVIDERS_TEMPLATE: Dict[str, Any] = {
+    "default_provider": "",  # optional: when set, used as default in workflows
+    "prompt_refinement": "",  # optional: phrase appended to translation prompts
+    "anthropic": {
+        "name": "Anthropic Claude",
+        "class": "AnthropicProvider",
+        "models": [
+            "claude-sonnet-4-20250514",
+            "claude-opus-4-20250514",
+            "claude-3-7-sonnet-20250219",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-opus-20240229"
+        ],
+        "default_model": "claude-sonnet-4-20250514"
+    },
+    "openai": {
+        "name": "OpenAI GPT",
+        "class": "OpenAIProvider",
+        "models": [
+            "gpt-5.1",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-chat-latest",
+            "gpt-5-2025-08-07",
+            "gpt-5-mini-2025-08-07",
+            "gpt-5-nano-2025-08-07",
+            "gpt-4.1",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo",
+            "gpt-4",
+            "gpt-3.5-turbo"
+        ],
+        "default_model": "gpt-5.1"
+    },
+    "google": {
+        "name": "Google Gemini",
+        "class": "GoogleGeminiProvider",
+        "models": [
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite"
+        ],
+        "default_model": "gemini-2.5-flash"
+    }
+}
 
 
 class ConfigManager:
@@ -34,6 +82,8 @@ class ConfigManager:
         """Create default configuration files if they don't exist."""
         if not self.providers_file.exists():
             self._create_default_providers()
+        else:
+            self._sync_provider_catalog()
         
         if not self.api_keys_file.exists():
             self._create_default_api_keys()
@@ -43,55 +93,59 @@ class ConfigManager:
     
     def _create_default_providers(self):
         """Create default providers configuration."""
-        default_providers = {
-            "default_provider": "",  # optional: when set, used as default in workflows
-            "prompt_refinement": "",  # optional: phrase appended to translation prompts
-            "anthropic": {
-                "name": "Anthropic Claude",
-                "class": "AnthropicProvider",
-                "models": [
-                    "claude-sonnet-4-20250514",
-                    "claude-opus-4-20250514", 
-                    "claude-3-7-sonnet-20250219",
-                    "claude-3-5-sonnet-20241022",
-                    "claude-3-opus-20240229"
-                ],
-                "default_model": "claude-sonnet-4-20250514"
-            },
-            "openai": {
-                "name": "OpenAI GPT",
-                "class": "OpenAIProvider", 
-                "models": [
-                    "gpt-5.1",
-                    "gpt-5-mini", 
-                    "gpt-5-nano",
-                    "gpt-5-chat-latest",
-                    "gpt-5-2025-08-07",
-                    "gpt-5-mini-2025-08-07",
-                    "gpt-5-nano-2025-08-07",
-                    "gpt-4.1",
-                    "gpt-4o",
-                    "gpt-4o-mini",
-                    "gpt-4-turbo",
-                    "gpt-4",
-                    "gpt-3.5-turbo"
-                ],
-                "default_model": "gpt-5.1"
-            },
-            "google": {
-                "name": "Google Gemini",
-                "class": "GoogleGeminiProvider",
-                "models": [
-                    "gemini-2.5-pro",
-                    "gemini-2.5-flash",
-                    "gemini-2.5-flash-lite"
-                ],
-                "default_model": "gemini-2.5-flash"
-            }
-        }
-        
         with open(self.providers_file, "w") as f:
-            json.dump(default_providers, f, indent=2)
+            json.dump(copy.deepcopy(DEFAULT_PROVIDERS_TEMPLATE), f, indent=2)
+    
+    def _sync_provider_catalog(self):
+        """
+        Keep providers.json in sync with the baked-in model lists so new models
+        are picked up automatically without manual edits.
+        """
+        try:
+            cfg = self.load_providers()
+        except Exception:
+            return
+        
+        changed = False
+        # Ensure global keys exist
+        for meta_key in ("default_provider", "prompt_refinement"):
+            if meta_key not in cfg:
+                cfg[meta_key] = DEFAULT_PROVIDERS_TEMPLATE.get(meta_key, "")
+                changed = True
+        
+        for provider_name, defaults in DEFAULT_PROVIDERS_TEMPLATE.items():
+            if provider_name in ("default_provider", "prompt_refinement"):
+                continue
+            existing = cfg.get(provider_name)
+            if not isinstance(existing, dict):
+                cfg[provider_name] = copy.deepcopy(defaults)
+                changed = True
+                continue
+            
+            # Update static metadata and model list from the template
+            for key in ("name", "class", "models"):
+                if existing.get(key) != defaults.get(key):
+                    existing[key] = copy.deepcopy(defaults.get(key))
+                    changed = True
+            
+            models = existing.get("models") or []
+            default_model = existing.get("default_model")
+            if default_model not in models:
+                fallback = defaults.get("default_model")
+                if fallback not in models and models:
+                    fallback = models[0]
+                if fallback:
+                    existing["default_model"] = fallback
+                    changed = True
+            
+            cfg[provider_name] = existing
+        
+        if changed:
+            try:
+                self.save_providers(cfg)
+            except Exception:
+                # If saving fails (e.g., read-only), still allow runtime to use the updated dict
+                pass
     
     def _create_default_api_keys(self):
         """Create default API keys template."""
