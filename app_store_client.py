@@ -12,6 +12,8 @@ from typing import Dict, Any, Optional, List
 import random
 from urllib.parse import urlparse, parse_qs
 
+from utils import get_field_limit
+
 
 class AppStoreConnectClient:
     """Client for interacting with App Store Connect API."""
@@ -49,12 +51,21 @@ class AppStoreConnectClient:
                  params: Optional[Dict[str, Any]] = None, 
                  data: Optional[Dict[str, Any]] = None,
                  max_retries: int = 3) -> Any:
-        """Make authenticated request to App Store Connect API with retry logic."""
+        """Make authenticated request to App Store Connect API with retry logic.
+
+        Supports both v1 and v2 endpoints: when `endpoint` starts with "v2/" it
+        uses the v2 base URL, otherwise defaults to v1.
+        """
         headers = {
             "Authorization": f"Bearer {self._generate_token()}",
             "Content-Type": "application/json"
         }
-        url = f"{self.BASE_URL}/{endpoint}"
+        if endpoint.startswith("v2/"):
+            url = f"https://api.appstoreconnect.apple.com/{endpoint}"
+        elif endpoint.startswith("v1/"):
+            url = f"https://api.appstoreconnect.apple.com/{endpoint}"
+        else:
+            url = f"{self.BASE_URL}/{endpoint}"
         
         for attempt in range(max_retries + 1):
             try:
@@ -452,4 +463,89 @@ class AppStoreConnectClient:
         except Exception as e:
             print(f"Error copying localization: {e}")
             return False
+
+    # ----------------------
+    # In-App Purchase helpers
+    # ----------------------
+
+    def get_in_app_purchases(self, app_id: str, limit: int = 200) -> Any:
+        """List in-app purchases for an app using the app relationship endpoint."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/apps/{app_id}/inAppPurchasesV2", params=params)
+
+    def get_in_app_purchase_localizations(self, iap_id: str) -> Any:
+        """Get localizations for a specific in-app purchase (v2 path)."""
+        return self._request("GET", f"v2/inAppPurchases/{iap_id}/inAppPurchaseLocalizations")
+
+    def get_in_app_purchase_localization(self, localization_id: str) -> Any:
+        """Get a single in-app purchase localization."""
+        return self._request("GET", f"inAppPurchaseLocalizations/{localization_id}")
+
+    def create_in_app_purchase_localization(self, iap_id: str, locale: str,
+                                           name: str,
+                                           description: Optional[str] = None) -> Any:
+        """Create a localization for an in-app purchase (name + description) via v1 endpoint with v2 relationship."""
+        name_limit = get_field_limit("iap_name") or 30
+        desc_limit = get_field_limit("iap_description") or 45
+        safe_name = (name or "")[:name_limit]
+        safe_desc = (description or "")[:desc_limit] if description else None
+        data = {
+            "data": {
+                "type": "inAppPurchaseLocalizations",
+                "attributes": {
+                    "locale": locale,
+                    "name": safe_name,
+                },
+                "relationships": {
+                    "inAppPurchaseV2": {
+                        "data": {
+                            "type": "inAppPurchases",
+                            "id": iap_id,
+                        }
+                    }
+                }
+            }
+        }
+        if safe_desc is not None:
+            data["data"]["attributes"]["description"] = safe_desc
+        try:
+            return self._request("POST", "v1/inAppPurchaseLocalizations", data=data)
+        except requests.exceptions.HTTPError as e:
+            status = getattr(e.response, "status_code", None)
+            if status == 409:
+                try:
+                    locs = self.get_in_app_purchase_localizations(iap_id)
+                    loc_map = {
+                        l.get("attributes", {}).get("locale"): l.get("id")
+                        for l in locs.get("data", [])
+                        if l.get("id")
+                    }
+                    loc_id = loc_map.get(locale)
+                    if loc_id:
+                        return self.update_in_app_purchase_localization(loc_id, name, description)
+                except Exception:
+                    pass
+            raise
+
+    def update_in_app_purchase_localization(self, localization_id: str,
+                                           name: Optional[str] = None,
+                                           description: Optional[str] = None) -> Any:
+        """Update an existing in-app purchase localization."""
+        name_limit = get_field_limit("iap_name") or 30
+        desc_limit = get_field_limit("iap_description") or 45
+        attrs: Dict[str, Any] = {}
+        if name is not None:
+            attrs["name"] = name[:name_limit]
+        if description is not None:
+            attrs["description"] = description[:desc_limit]
+        if not attrs:
+            return self.get_in_app_purchase_localization(localization_id)
+        data = {
+            "data": {
+                "type": "inAppPurchaseLocalizations",
+                "id": localization_id,
+                "attributes": attrs,
+            }
+        }
+        return self._request("PATCH", f"inAppPurchaseLocalizations/{localization_id}", data=data)
     

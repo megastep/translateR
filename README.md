@@ -92,7 +92,7 @@ Concurrency (advanced):
 - Set a global translation guidance phrase: in the CLI, open “⚙️  Configuration” → “Set translation prompt refinement”.
 - During workflows, you can enter a per-run refinement phrase; the tool appends it to the system/prompt sent to the AI.
 
-## 9 Main Workflows
+## 8 Main Workflows
 
 ### 1. 🌐 Translation Mode
 
@@ -157,6 +157,15 @@ Concurrency (advanced):
 - Separate workflow for branding elements
 - 30-character limits enforced
 - Brand-focused translations
+
+### 8. 🛒 IAP Translations
+
+**Use when**: Localizing in-app purchase display name and description
+
+- Pick one or more IAP products tied to the selected app
+- Detects the base locale from existing IAP localizations
+- Translates name (30 chars) and description (45 chars) into missing locales
+- Saves each locale automatically, reusing your chosen AI provider and refinement phrase
 
 ### 8. 📄 Export Localizations
 

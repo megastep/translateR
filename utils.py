@@ -66,7 +66,9 @@ FIELD_LIMITS = {
     "whats_new": 4000,
     "privacy_policy_url": 255,
     "marketing_url": 255,
-    "support_url": 255
+    "support_url": 255,
+    "iap_name": 30,
+    "iap_description": 45,
 }
 
 
