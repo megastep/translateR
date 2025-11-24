@@ -132,15 +132,32 @@ def _choose_targets(ui, existing_locales: List[str], base_locale: str, preferred
     default_checked = {loc for loc in available_targets if loc in preferred_locales}
 
     if ui.available():
-        choices = [
+        choices = [{"name": "📝 Manual entry (comma-separated locales)", "value": "__manual__"}]
+        choices += [
             {"name": f"{loc} - {nm}", "value": loc, "enabled": loc in default_checked}
             for (loc, nm) in available_targets.items()
         ]
-        return ui.checkbox("Select target languages (Space to toggle, Enter to confirm)", choices, add_back=True) or []
+        selected = ui.checkbox("Select target languages (Space to toggle, Enter to confirm)", choices, add_back=True) or []
+        if "__manual__" in selected:
+            selected = []
+        if selected:
+            return [s for s in selected if s in available_targets]
+        # Manual entry fallback even when TUI is present
+        raw = input("Enter target locales (comma-separated): ").strip()
+        if not raw:
+            return []
+        return [s.strip() for s in raw.split(',') if s.strip() in available_targets]
 
+    # Non-TUI: show in two columns for better visibility
     print("Available target locales:")
-    for i, (loc, nm) in enumerate(list(available_targets.items())[:20], 1):
-        print(f"{i:2d}. {loc:8} - {nm}")
+    items = list(available_targets.items())
+    col_width = 28
+    for i in range(0, len(items), 2):
+        left = items[i]
+        right = items[i + 1] if i + 1 < len(items) else None
+        left_txt = f"{left[0]:8} - {left[1]}".ljust(col_width)
+        right_txt = f"{right[0]:8} - {right[1]}" if right else ""
+        print(f"{left_txt} {right_txt}")
     default_list = sorted(default_checked)
     raw = input("Enter target locales (comma-separated, Enter = app locales): ").strip()
     if not raw:

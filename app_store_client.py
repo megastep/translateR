@@ -527,6 +527,149 @@ class AppStoreConnectClient:
                     pass
             raise
 
+    # ----------------------
+    # Subscriptions
+    # ----------------------
+
+    def get_subscription_groups(self, app_id: str, limit: int = 200) -> Any:
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/apps/{app_id}/subscriptionGroups", params=params)
+
+    def get_subscriptions_for_group(self, group_id: str, limit: int = 200) -> Any:
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/subscriptionGroups/{group_id}/subscriptions", params=params)
+
+    def get_subscription_localizations(self, subscription_id: str) -> Any:
+        return self._request("GET", f"v1/subscriptions/{subscription_id}/subscriptionLocalizations")
+
+    def create_subscription_localization(self, subscription_id: str, locale: str,
+                                        name: str,
+                                        description: Optional[str] = None) -> Any:
+        data = {
+            "data": {
+                "type": "subscriptionLocalizations",
+                "attributes": {
+                    "locale": locale,
+                    "name": name,
+                },
+                "relationships": {
+                    "subscription": {
+                        "data": {
+                            "type": "subscriptions",
+                            "id": subscription_id,
+                        }
+                    }
+                }
+            }
+        }
+        if description is not None:
+            data["data"]["attributes"]["description"] = description
+        try:
+            return self._request("POST", "v1/subscriptionLocalizations", data=data)
+        except requests.exceptions.HTTPError as e:
+            status = getattr(e.response, "status_code", None)
+            if status == 409:
+                try:
+                    locs = self.get_subscription_localizations(subscription_id)
+                    loc_map = {
+                        l.get("attributes", {}).get("locale"): l.get("id")
+                        for l in locs.get("data", []) if l.get("id")
+                    }
+                    loc_id = loc_map.get(locale)
+                    if loc_id:
+                        return self.update_subscription_localization(loc_id, name, description)
+                except Exception:
+                    pass
+                # If we reach here and handled conflict, return current localizations
+                return loc_map if 'loc_map' in locals() else None
+            raise
+
+    def update_subscription_localization(self, localization_id: str,
+                                         name: Optional[str] = None,
+                                         description: Optional[str] = None) -> Any:
+        attrs: Dict[str, Any] = {}
+        if name is not None:
+            attrs["name"] = name
+        if description is not None:
+            attrs["description"] = description
+        if not attrs:
+            return self._request("GET", f"v1/subscriptionLocalizations/{localization_id}")
+        data = {
+            "data": {
+                "type": "subscriptionLocalizations",
+                "id": localization_id,
+                "attributes": attrs,
+            }
+        }
+        return self._request("PATCH", f"v1/subscriptionLocalizations/{localization_id}", data=data)
+
+    # Subscription Group Localizations
+    def get_subscription_group_localizations(self, group_id: str) -> Any:
+        return self._request("GET", f"v1/subscriptionGroups/{group_id}/subscriptionGroupLocalizations")
+
+    def create_subscription_group_localization(self, group_id: str, locale: str,
+                                               name: str,
+                                               custom_app_name: Optional[str] = None) -> Any:
+        name_limit = get_field_limit("subscription_group_name") or len(name or "")
+        custom_limit = get_field_limit("subscription_group_custom_app_name") or len(custom_app_name or "")
+        data = {
+            "data": {
+                "type": "subscriptionGroupLocalizations",
+                "attributes": {
+                    "locale": locale,
+                    "name": (name or "")[:name_limit],
+                },
+                "relationships": {
+                    "subscriptionGroup": {
+                        "data": {
+                            "type": "subscriptionGroups",
+                            "id": group_id,
+                        }
+                    }
+                }
+            }
+        }
+        if custom_app_name is not None:
+            data["data"]["attributes"]["customAppName"] = (custom_app_name or "")[:custom_limit]
+        try:
+            return self._request("POST", "v1/subscriptionGroupLocalizations", data=data)
+        except requests.exceptions.HTTPError as e:
+            status = getattr(e.response, "status_code", None)
+            if status == 409:
+                try:
+                    locs = self.get_subscription_group_localizations(group_id)
+                    loc_map = {
+                        l.get("attributes", {}).get("locale"): l.get("id")
+                        for l in locs.get("data", []) if l.get("id")
+                    }
+                    loc_id = loc_map.get(locale)
+                    if loc_id:
+                        return self.update_subscription_group_localization(loc_id, name, custom_app_name)
+                except Exception:
+                    pass
+            raise
+
+    def update_subscription_group_localization(self, localization_id: str,
+                                                name: Optional[str] = None,
+                                                custom_app_name: Optional[str] = None) -> Any:
+        attrs: Dict[str, Any] = {}
+        if name is not None:
+            limit = get_field_limit("subscription_group_name") or len(name)
+            attrs["name"] = name[:limit]
+        if custom_app_name is not None:
+            limit = get_field_limit("subscription_group_custom_app_name") or len(custom_app_name)
+            attrs["customAppName"] = custom_app_name[:limit]
+        if not attrs:
+            return self._request("GET", f"v1/subscriptionGroupLocalizations/{localization_id}")
+        data = {
+            "data": {
+                "type": "subscriptionGroupLocalizations",
+                "id": localization_id,
+                "attributes": attrs,
+            }
+        }
+        return self._request("PATCH", f"v1/subscriptionGroupLocalizations/{localization_id}", data=data)
+
     def update_in_app_purchase_localization(self, localization_id: str,
                                            name: Optional[str] = None,
                                            description: Optional[str] = None) -> Any:

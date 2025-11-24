@@ -92,7 +92,7 @@ Concurrency (advanced):
 - Set a global translation guidance phrase: in the CLI, open “⚙️  Configuration” → “Set translation prompt refinement”.
 - During workflows, you can enter a per-run refinement phrase; the tool appends it to the system/prompt sent to the AI.
 
-## 8 Main Workflows
+## 9 Main Workflows
 
 ### 1. 🌐 Translation Mode
 
@@ -166,6 +166,15 @@ Concurrency (advanced):
 - Detects the base locale from existing IAP localizations
 - Translates name (30 chars) and description (45 chars) into missing locales
 - Saves each locale automatically, reusing your chosen AI provider and refinement phrase
+
+### 9. 💳 Subscription Translations
+
+**Use when**: Localizing subscription name and description
+
+- Choose a subscription group for the app, then pick specific subscriptions
+- Detects base locale from existing subscription localizations
+- Prefills target languages with the app’s existing locales
+- Translates name and description for missing locales and saves updates automatically
 
 ### 8. 📄 Export Localizations
 

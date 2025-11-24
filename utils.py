@@ -69,6 +69,10 @@ FIELD_LIMITS = {
     "support_url": 255,
     "iap_name": 30,
     "iap_description": 45,
+    "subscription_name": 60,
+    "subscription_description": 200,
+    "subscription_group_name": 60,
+    "subscription_group_custom_app_name": 30,
 }
 
 
