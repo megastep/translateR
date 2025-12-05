@@ -76,7 +76,7 @@ class AppStoreConnectClient:
                 if response.status_code == 409 and attempt < max_retries:
                     # Conflict error - retry with exponential backoff
                     wait_time = (2 ** attempt) + random.uniform(0, 1)
-                    print(f"⚠️  API conflict detected, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
+                    print(f"⚠️  API conflict detected for {url} (params={params}, data={data}), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
                     time.sleep(wait_time)
                     continue
                 else:
@@ -565,7 +565,7 @@ class AppStoreConnectClient:
         if description is not None:
             data["data"]["attributes"]["description"] = description
         try:
-            return self._request("POST", "v1/subscriptionLocalizations", data=data)
+            return self._request("POST", "v1/subscriptionLocalizations", data=data, max_retries=0)
         except requests.exceptions.HTTPError as e:
             status = getattr(e.response, "status_code", None)
             if status == 409:
@@ -601,7 +601,7 @@ class AppStoreConnectClient:
                 "attributes": attrs,
             }
         }
-        return self._request("PATCH", f"v1/subscriptionLocalizations/{localization_id}", data=data)
+        return self._request("PATCH", f"v1/subscriptionLocalizations/{localization_id}", data=data, max_retries=0)
 
     # Subscription Group Localizations
     def get_subscription_group_localizations(self, group_id: str) -> Any:
@@ -632,7 +632,7 @@ class AppStoreConnectClient:
         if custom_app_name is not None:
             data["data"]["attributes"]["customAppName"] = (custom_app_name or "")[:custom_limit]
         try:
-            return self._request("POST", "v1/subscriptionGroupLocalizations", data=data)
+            return self._request("POST", "v1/subscriptionGroupLocalizations", data=data, max_retries=0)
         except requests.exceptions.HTTPError as e:
             status = getattr(e.response, "status_code", None)
             if status == 409:
@@ -668,7 +668,7 @@ class AppStoreConnectClient:
                 "attributes": attrs,
             }
         }
-        return self._request("PATCH", f"v1/subscriptionGroupLocalizations/{localization_id}", data=data)
+        return self._request("PATCH", f"v1/subscriptionGroupLocalizations/{localization_id}", data=data, max_retries=0)
 
     def update_in_app_purchase_localization(self, localization_id: str,
                                            name: Optional[str] = None,

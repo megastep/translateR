@@ -17,47 +17,63 @@ from utils import (
     print_success,
     parallel_map_locales,
     provider_model_info,
+    format_progress,
 )
 
 
-def _pick_group(ui, asc, app_id: str):
+def _pick_groups(ui, asc, app_id: str) -> List[Dict]:
     resp = asc.get_subscription_groups(app_id)
     groups = resp.get("data", []) if isinstance(resp, dict) else []
     if not groups:
         print_warning("No subscription groups found for this app")
-        return None
+        return []
     choices = []
+    id_to_group = {}
     for g in groups:
         attrs = g.get("attributes", {})
         label = attrs.get("referenceName") or g.get("id")
         choices.append({"name": label, "value": g.get("id")})
+        id_to_group[g.get("id")] = g
+    selected_ids: List[str] = []
     if ui.available():
-        return ui.select("Select subscription group", choices, add_back=True)
-    for idx, c in enumerate(choices, 1):
-        print(f"{idx}. {c['name']}")
-    raw = input("Select group (number): ").strip()
-    try:
-        idx = int(raw)
-        return choices[idx - 1]["value"] if 1 <= idx <= len(choices) else None
-    except Exception:
-        return None
-
-
-def _pick_subscriptions(ui, asc, group_id: str) -> List[Dict]:
-    resp = asc.get_subscriptions_for_group(group_id)
-    subs = resp.get("data", []) if isinstance(resp, dict) else []
-    if not subs:
-        print_warning("No subscriptions found in this group")
+        selected_ids = ui.checkbox("Select subscription group(s)", choices, add_back=True) or []
+    else:
+        for idx, c in enumerate(choices, 1):
+            print(f"{idx}. {c['name']}")
+        raw = input("Enter group numbers (comma-separated): ").strip()
+        if raw:
+            try:
+                nums = [int(x) for x in raw.replace(' ', '').split(',') if x]
+                for n in nums:
+                    if 1 <= n <= len(choices):
+                        selected_ids.append(choices[n - 1]["value"])
+            except Exception:
+                selected_ids = []
+    if not selected_ids:
+        print_warning("No subscription groups selected")
         return []
+    return [id_to_group[sid] for sid in selected_ids if sid in id_to_group]
+
+
+def _pick_subscriptions(ui, asc, groups: List[Dict]) -> List[Dict]:
+    """Select subscriptions across one or more groups."""
     choices = []
-    id_to_item = {}
-    for s in subs:
-        attrs = s.get("attributes", {})
-        name = attrs.get("name") or s.get("id")
-        pid = attrs.get("productId", "")
-        label = name + (f"  [{pid}]" if pid else "")
-        choices.append({"name": label, "value": s.get("id")})
-        id_to_item[s.get("id")] = s
+    id_to_item: Dict[str, Dict] = {}
+    for group in groups:
+        group_id = group.get("id")
+        group_name = (group.get("attributes") or {}).get("referenceName") or group_id
+        resp = asc.get_subscriptions_for_group(group_id)
+        subs = resp.get("data", []) if isinstance(resp, dict) else []
+        if not subs:
+            continue
+        for s in subs:
+            attrs = s.get("attributes", {})
+            name = attrs.get("name") or s.get("id")
+            pid = attrs.get("productId", "")
+            label = name + (f"  [{pid}]" if pid else "")
+            label = f"{group_name}: {label}"
+            choices.append({"name": label, "value": s.get("id")})
+            id_to_item[s.get("id")] = s
     selected: List[str] = []
     if ui.available():
         selected = ui.checkbox("Select subscriptions to translate", choices, add_back=True) or []
@@ -104,22 +120,18 @@ def run(cli) -> bool:
         print_info("Cancelled")
         return True
 
-    group_id = _pick_group(ui, asc, app_id)
-    if not group_id:
-        print_warning("No group selected")
+    groups_selected = _pick_groups(ui, asc, app_id)
+    if not groups_selected:
         return True
 
     subs: List[Dict] = []
     groups: List[Dict] = []
     if scope == "sub":
-        subs = _pick_subscriptions(ui, asc, group_id)
+        subs = _pick_subscriptions(ui, asc, groups_selected)
         if not subs:
             return True
     else:
-        groups = [g for g in (asc.get_subscription_groups(app_id).get("data", []) or []) if g.get("id") == group_id]
-        if not groups:
-            print_warning("No group data found")
-            return True
+        groups = groups_selected
 
     # Prefill locales from app's latest version
     app_locales = set()
@@ -186,11 +198,14 @@ def run(cli) -> bool:
         print_info(f"Base language: {APP_STORE_LOCALES.get(base_locale, base_locale)} [{base_locale}]")
 
         existing_locale_ids: Dict[str, str] = {l.get("attributes", {}).get("locale"): l.get("id") for l in locs if l.get("id")}
+        existing_locale_attrs: Dict[str, Dict] = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in locs if l.get("attributes")}
         from workflows.iap_translate import _choose_targets  # reuse locale selector with defaults
         if global_targets_enabled and global_targets:
-            target_locales = [t for t in global_targets if t not in existing_locale_ids and t != base_locale]
+            target_locales = [t for t in global_targets if t not in existing_locale_ids]
         else:
             target_locales = _choose_targets(ui, list(existing_locale_ids.keys()), base_locale, preferred_locales=app_locales)
+        # Always avoid translating the base locale
+        target_locales = [t for t in target_locales if t != base_locale]
         if not target_locales:
             print_warning("No target languages selected; skipping this subscription")
             continue
@@ -211,39 +226,156 @@ def run(cli) -> bool:
         results, errs = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=0.0)
 
         success = 0
+        total_targets = len(target_locales)
+        completed = 0
+        last_progress_len = 0
+        try:
+            line = format_progress(0, total_targets, "Saving locales...")
+            print(line, end="\r")
+            last_progress_len = len(line)
+        except Exception:
+            pass
+        def _refresh_locale_ids() -> Dict[str, str]:
+            try:
+                refreshed = asc.get_subscription_localizations(sub.get("id")) if scope == "sub" else asc.get_subscription_group_localizations(sub.get("id"))
+                refreshed_map = {l.get("attributes", {}).get("locale"): l.get("id") for l in refreshed.get("data", []) if l.get("id")}
+                refreshed_attrs = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in refreshed.get("data", []) if l.get("attributes")}
+                existing_locale_ids.clear()
+                existing_locale_ids.update(refreshed_map)
+                existing_locale_attrs.clear()
+                existing_locale_attrs.update(refreshed_attrs)
+                return refreshed_map
+            except Exception:
+                return existing_locale_ids
+
+        def _unique_root_match(loc_map: Dict[str, str], locale_code: str) -> str:
+            root = locale_code.split("-")[0].lower()
+            matches = [lid for code, lid in loc_map.items() if code and code.split("-")[0].lower() == root]
+            return matches[0] if len(matches) == 1 else ""
+
         for loc, data in results.items():
             loc_id = existing_locale_ids.get(loc)
+            if not loc_id:
+                # Attempt a pre-flight unique root match before creation (e.g., fi vs fi-FI)
+                loc_id = _unique_root_match(existing_locale_ids, loc)
+
+            # Skip update if current values already match desired ones
+            if loc_id:
+                current_attrs = existing_locale_attrs.get(loc, {})
+                current_name = current_attrs.get("name")
+                current_desc = current_attrs.get("description") if scope == "sub" else current_attrs.get("customAppName")
+                desired_name = data.get("name")
+                desired_desc = data.get("description") if scope == "sub" else data.get("customAppName")
+                if current_name == desired_name and (desired_desc is None or current_desc == desired_desc):
+                    success += 1
+                    completed += 1
+                    try:
+                        line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
+                        pad = max(0, last_progress_len - len(line))
+                        print("\r" + line + (" " * pad), end="")
+                        last_progress_len = len(line)
+                    except Exception:
+                        pass
+                    continue
             try:
                 if scope == "sub":
                     if loc_id:
                         asc.update_subscription_localization(loc_id, data.get("name"), data.get("description"))
                     else:
+                        time.sleep(0.25)
                         asc.create_subscription_localization(sub.get("id"), loc, data.get("name", ""), data.get("description"))
+                        _refresh_locale_ids()
+                    existing_locale_attrs[loc] = {"name": data.get("name"), "description": data.get("description")}
                 else:
                     if loc_id:
                         asc.update_subscription_group_localization(loc_id, data.get("name"), data.get("customAppName"))
                     else:
+                        time.sleep(0.25)
                         asc.create_subscription_group_localization(sub.get("id"), loc, data.get("name", ""), data.get("customAppName"))
+                        _refresh_locale_ids()
+                    existing_locale_attrs[loc] = {"name": data.get("name"), "customAppName": data.get("customAppName")}
                 success += 1
+                completed += 1
+                try:
+                    line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
+                    pad = max(0, last_progress_len - len(line))
+                    print("\r" + line + (" " * pad), end="")
+                    last_progress_len = len(line)
+                except Exception:
+                    pass
             except Exception as e:
-                if "409" in str(e) and not loc_id:
+                if "409" in str(e):
                     try:
                         refreshed = asc.get_subscription_localizations(sub.get("id")) if scope == "sub" else asc.get_subscription_group_localizations(sub.get("id"))
-                        refreshed_map = {l.get("attributes", {}).get("locale"): l.get("id") for l in refreshed.get("data", [])}
-                        new_id = refreshed_map.get(loc)
+                        refreshed_map = {l.get("attributes", {}).get("locale"): l.get("id") for l in refreshed.get("data", []) if l.get("id")}
+                        refreshed_attrs = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in refreshed.get("data", []) if l.get("attributes")}
+                        loc_obj = next((l for l in refreshed.get("data", []) if l.get("attributes", {}).get("locale") == loc), None)
+                        if not loc_obj:
+                            # Try unique language-root match only when unambiguous (avoid en-US/en-GB conflicts)
+                            root = loc.split("-")[0].lower()
+                            candidates = [l for l in refreshed.get("data", []) if l.get("attributes", {}).get("locale", "").split("-")[0].lower() == root]
+                            loc_obj = candidates[0] if len(candidates) == 1 else None
+                        if loc_obj:
+                            attrs = loc_obj.get("attributes", {})
+                            desired_name = data.get("name")
+                            desired_desc = data.get("description") if scope == "sub" else data.get("customAppName")
+                            current_desc = attrs.get("description") if scope == "sub" else attrs.get("customAppName")
+                            if attrs.get("name") == desired_name and (desired_desc is None or current_desc == desired_desc):
+                                success += 1
+                                existing_locale_ids[loc] = loc_obj.get("id") or existing_locale_ids.get(loc, "")
+                                if loc_obj.get("attributes", {}).get("locale"):
+                                    existing_locale_attrs[loc_obj.get("attributes", {}).get("locale")] = attrs
+                                continue
+                        new_id = refreshed_map.get(loc) or _unique_root_match(refreshed_map, loc)
                         if new_id:
                             if scope == "sub":
                                 asc.update_subscription_localization(new_id, data.get("name"), data.get("description"))
                             else:
                                 asc.update_subscription_group_localization(new_id, data.get("name"), data.get("customAppName"))
                             success += 1
+                            existing_locale_ids[loc] = new_id
+                            if refreshed_attrs.get(loc):
+                                existing_locale_attrs[loc] = refreshed_attrs.get(loc)
+                            completed += 1
+                            try:
+                                line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
+                                pad = max(0, last_progress_len - len(line))
+                                print("\r" + line + (" " * pad), end="")
+                                last_progress_len = len(line)
+                            except Exception:
+                                pass
                             continue
+                        # If we still don't have an ID, check direct fetch by loc_id when we had one and see if it already matches
+                        if loc_id:
+                            try:
+                                fetched = asc.get_subscription_localization(loc_id) if scope == "sub" else asc.get_subscription_group_localization(loc_id)
+                                f_attrs = fetched.get("data", {}).get("attributes", {}) if isinstance(fetched, dict) else {}
+                                desired_name = data.get("name")
+                                desired_desc = data.get("description") if scope == "sub" else data.get("customAppName")
+                                current_desc = f_attrs.get("description") if scope == "sub" else f_attrs.get("customAppName")
+                                if f_attrs.get("name") == desired_name and (desired_desc is None or current_desc == desired_desc):
+                                    success += 1
+                                    existing_locale_attrs[loc] = f_attrs
+                                    completed += 1
+                                    try:
+                                        line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
+                                        pad = max(0, last_progress_len - len(line))
+                                        print("\r" + line + (" " * pad), end="")
+                                        last_progress_len = len(line)
+                                    except Exception:
+                                        pass
+                                    continue
+                            except Exception:
+                                pass
                     except Exception:
-                        success += 1
-                        continue
+                        pass
                 language_name = APP_STORE_LOCALES.get(loc, loc)
                 print_error(f"  ❌ Failed to save {language_name}: {e}")
 
+        try:
+            print("\r" + (" " * last_progress_len) + "\r", end="")
+        except Exception:
+            pass
         print_success(f"Saved {success}/{len(target_locales)} locales for {label}")
 
     input("\nPress Enter to continue...")

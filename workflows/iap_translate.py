@@ -18,6 +18,7 @@ from utils import (
     print_success,
     parallel_map_locales,
     provider_model_info,
+    format_progress,
 )
 
 
@@ -255,6 +256,15 @@ def run(cli) -> bool:
         results, errs = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=0.0)
 
         success_count = 0
+        total_targets = len(target_locales)
+        completed = 0
+        last_progress_len = 0
+        try:
+            line = format_progress(0, total_targets, "Saving locales...")
+            print(line, end="\r")
+            last_progress_len = len(line)
+        except Exception:
+            pass
         for loc, data in results.items():
             loc_id = existing_locale_ids.get(loc)
             try:
@@ -268,6 +278,14 @@ def run(cli) -> bool:
                         data.get("description"),
                     )
                 success_count += 1
+                completed += 1
+                try:
+                    line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
+                    pad = max(0, last_progress_len - len(line))
+                    print("\r" + line + (" " * pad), end="")
+                    last_progress_len = len(line)
+                except Exception:
+                    pass
             except Exception as e:
                 # If creation conflicted, try to refresh and update instead
                 if "409" in str(e) and not loc_id:
@@ -279,12 +297,24 @@ def run(cli) -> bool:
                             asc.update_in_app_purchase_localization(new_id, data.get("name"), data.get("description"))
                             success_count += 1
                             existing_locale_ids[loc] = new_id
+                            completed += 1
+                            try:
+                                line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
+                                pad = max(0, last_progress_len - len(line))
+                                print("\r" + line + (" " * pad), end="")
+                                last_progress_len = len(line)
+                            except Exception:
+                                pass
                             continue
                     except Exception:
                         pass
                 language_name = APP_STORE_LOCALES.get(loc, loc)
                 print_error(f"  ❌ Failed to save {language_name}: {e}")
 
+        try:
+            print("\r" + (" " * last_progress_len) + "\r", end="")
+        except Exception:
+            pass
         total_translated += success_count
         print_success(f"Saved {success_count}/{len(target_locales)} locales for {label}")
 
