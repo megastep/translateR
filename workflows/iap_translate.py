@@ -29,7 +29,6 @@ def _select_iaps(ui, asc, app_id: str) -> List[Dict]:
         print_error("No in-app purchases found for this app")
         return []
 
-    id_to_item = {i.get("id"): i for i in items if i.get("id")}
     choices = []
     for i in items:
         attrs = i.get("attributes", {})
@@ -132,12 +131,17 @@ def _choose_targets(ui, existing_locales: List[str], base_locale: str, preferred
     default_checked = {loc for loc in available_targets if loc in preferred_locales}
 
     if ui.available():
-        choices = [{"name": "📝 Manual entry (comma-separated locales)", "value": "__manual__"}]
+        choices = [
+            {"name": "🌐 Select all available locales", "value": "__all__"},
+            {"name": "📝 Manual entry (comma-separated locales)", "value": "__manual__"},
+        ]
         choices += [
             {"name": f"{loc} - {nm}", "value": loc, "enabled": loc in default_checked}
             for (loc, nm) in available_targets.items()
         ]
         selected = ui.checkbox("Select target languages (Space to toggle, Enter to confirm)", choices, add_back=True) or []
+        if "__all__" in selected:
+            return [loc for loc in available_targets.keys() if loc != base_locale]
         if "__manual__" in selected:
             selected = []
         if selected:
@@ -159,9 +163,11 @@ def _choose_targets(ui, existing_locales: List[str], base_locale: str, preferred
         right_txt = f"{right[0]:8} - {right[1]}" if right else ""
         print(f"{left_txt} {right_txt}")
     default_list = sorted(default_checked)
-    raw = input("Enter target locales (comma-separated, Enter = app locales): ").strip()
+    raw = input("Enter target locales (comma-separated, 'all' for every locale, Enter = app locales): ").strip()
     if not raw:
         return default_list if default_list else []
+    if raw.lower() in ("all", "*"):
+        return [loc for loc in available_targets.keys() if loc != base_locale]
     selected = [s.strip() for s in raw.split(',') if s.strip() in available_targets]
     return selected or default_list
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 # App Store supported locales with their language names
 APP_STORE_LOCALES = {
-    "ar": "Arabic",
+    "ar-SA": "Arabic",
     "ca": "Catalan", 
     "zh-Hans": "Chinese (Simplified)",
     "zh-Hant": "Chinese (Traditional)",
