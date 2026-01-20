@@ -88,7 +88,7 @@ All workflows live in `workflows/` and follow a consistent pattern:
 
 - **workflows/subscription_translate.py**: Translate subscription names and descriptions for subscription groups.
 
-- **workflows/game_center_localizations.py**: Translate Game Center achievements and leaderboards with multi-platform support.
+- **workflows/game_center_localizations.py**: Translate Game Center achievements, leaderboards, activities, and challenges with multi-platform support.
 
 - **workflows/app_events_translate.py**: Translate App Store in-app event metadata (name, short description, long description).
 
