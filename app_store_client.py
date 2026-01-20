@@ -6,6 +6,7 @@ app metadata and localizations.
 """
 
 import jwt
+import json
 import time
 import requests
 from typing import Dict, Any, Optional, List
@@ -60,6 +61,20 @@ class AppStoreConnectClient:
             "Authorization": f"Bearer {self._generate_token()}",
             "Content-Type": "application/json"
         }
+
+        def _safe_preview(value: Any, limit: int = 400) -> str:
+            if value is None:
+                return "None"
+            try:
+                txt = json.dumps(value, ensure_ascii=True, default=str)
+            except Exception:
+                try:
+                    txt = repr(value)
+                except Exception:
+                    return "<unprintable>"
+            if len(txt) > limit:
+                return txt[:limit] + "…"
+            return txt
         if endpoint.startswith("v2/"):
             url = f"https://api.appstoreconnect.apple.com/{endpoint}"
         elif endpoint.startswith("v1/"):
@@ -73,13 +88,46 @@ class AppStoreConnectClient:
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.HTTPError as e:
-                if response.status_code == 409 and attempt < max_retries:
+                status = response.status_code
+                if status == 409 and attempt < max_retries:
                     # Conflict error - retry with exponential backoff
                     wait_time = (2 ** attempt) + random.uniform(0, 1)
-                    print(f"⚠️  API conflict detected for {url} (params={params}, data={data}), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
+                    print(f"⚠️  API conflict detected for {url} (params={_safe_preview(params)}, data={_safe_preview(data)}), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
+                    time.sleep(wait_time)
+                    continue
+                if status >= 500 and status <= 599 and attempt < max_retries:
+                    # Server error - retry with exponential backoff (respect Retry-After if provided)
+                    retry_after = response.headers.get("Retry-After")
+                    try:
+                        wait_time = float(retry_after)
+                    except Exception:
+                        wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    req_id = response.headers.get("x-request-id") or response.headers.get("request-id") or response.headers.get("X-Request-Id")
+                    body_excerpt = ""
+                    try:
+                        text = response.text or ""
+                        body_excerpt = text[:300].replace("\n", " ").strip()
+                    except Exception:
+                        body_excerpt = ""
+                    detail = f", request_id={req_id}" if req_id else ""
+                    if body_excerpt:
+                        detail += f", body=\"{body_excerpt}\""
+                    print(f"⚠️  Server error {status} for {url} (params={_safe_preview(params)}, data={_safe_preview(data)}){detail}, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
                     time.sleep(wait_time)
                     continue
                 else:
+                    if status >= 500 and status <= 599:
+                        req_id = response.headers.get("x-request-id") or response.headers.get("request-id") or response.headers.get("X-Request-Id")
+                        body_excerpt = ""
+                        try:
+                            text = response.text or ""
+                            body_excerpt = text[:300].replace("\n", " ").strip()
+                        except Exception:
+                            body_excerpt = ""
+                        detail = f", request_id={req_id}" if req_id else ""
+                        if body_excerpt:
+                            detail += f", body=\"{body_excerpt}\""
+                        print(f"❌ Server error {status} for {url} (params={_safe_preview(params)}, data={_safe_preview(data)}){detail}")
                     raise e
     
     def get_apps(self, limit: int = 200) -> Any:

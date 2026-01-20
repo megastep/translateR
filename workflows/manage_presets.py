@@ -27,6 +27,7 @@ from utils import (
     print_success,
     print_warning,
 )
+from workflows.helpers import pick_provider
 
 
 def _preset_preview(preset: ReleaseNotePreset) -> str:
@@ -37,59 +38,10 @@ def _preset_preview(preset: ReleaseNotePreset) -> str:
 
 
 def _select_provider(cli) -> Optional[Tuple[str, object]]:
-    ui = cli.ui
-    providers_mgr = cli.ai_manager
-    provs = providers_mgr.list_providers()
-    if not provs:
-        print_error("No AI providers configured. Run configuration first.")
+    provider, provider_key = pick_provider(cli, prompt="Select AI provider for preset translation")
+    if not provider:
         return None
-
-    default_provider = getattr(cli, "config", None).get_default_ai_provider() if getattr(cli, "config", None) else None
-    selected_provider: Optional[str] = None
-
-    if len(provs) == 1:
-        selected_provider = provs[0]
-        print_info(f"Using AI provider: {selected_provider}")
-    else:
-        if default_provider and default_provider in provs:
-            use_default = ui.confirm(f"Use default AI provider: {default_provider}?", True)
-            if use_default is None:
-                raw = input(f"Use default provider '{default_provider}'? (Y/n): ").strip().lower()
-                use_default = raw in ("", "y", "yes")
-            if use_default:
-                selected_provider = default_provider
-        if not selected_provider:
-            if ui.available():
-                choices = [{"name": p + ("  (default)" if p == default_provider else ""), "value": p} for p in provs]
-                selected_provider = ui.select("Select AI provider for preset translation", choices, add_back=True)
-            if not selected_provider:
-                print("Available AI providers:")
-                for i, p in enumerate(provs, 1):
-                    star = " *" if p == default_provider else ""
-                    print(f"{i}. {p}{star}")
-                raw = input("Select provider (number) or 'b' to cancel (Enter = default): ").strip().lower()
-                if raw == "b":
-                    print_info("Cancelled")
-                    return None
-                if not raw and default_provider and default_provider in provs:
-                    selected_provider = default_provider
-                else:
-                    try:
-                        idx = int(raw)
-                        if 1 <= idx <= len(provs):
-                            selected_provider = provs[idx - 1]
-                        else:
-                            print_error("Invalid choice")
-                            return None
-                    except ValueError:
-                        print_error("Please enter a number")
-                        return None
-
-    if not selected_provider:
-        print_info("Cancelled")
-        return None
-    provider = providers_mgr.get_provider(selected_provider)
-    return selected_provider, provider
+    return provider_key, provider
 
 
 def _prompt_text(ui, prompt: str, initial: str = "") -> Optional[str]:

@@ -19,6 +19,7 @@ from utils import (
     provider_model_info,
     format_progress,
 )
+from workflows.helpers import pick_provider, choose_target_locales, get_app_locales
 
 
 def _pick_groups(ui, asc, app_id: str) -> List[Dict]:
@@ -134,18 +135,9 @@ def run(cli) -> bool:
         groups = groups_selected
 
     # Prefill locales from app's latest version
-    app_locales = set()
-    try:
-        latest_ver = asc.get_latest_app_store_version(app_id)
-        if latest_ver:
-            locs = asc.get_app_store_version_localizations(latest_ver).get("data", [])
-            app_locales = {l.get("attributes", {}).get("locale") for l in locs if l.get("attributes", {}).get("locale")}
-    except Exception:
-        pass
+    app_locales = get_app_locales(asc, app_id)
 
-    # Provider selection (reuse helper from IAP)
-    from workflows.iap_translate import _pick_provider  # reuse selection helper
-    provider, provider_key = _pick_provider(cli)
+    provider, provider_key = pick_provider(cli)
     if not provider:
         return True
     refine_phrase = (getattr(cli, "config", None).get_prompt_refinement() if getattr(cli, "config", None) else "") or ""
@@ -164,8 +156,8 @@ def run(cli) -> bool:
         locs_first = loc_resp.get("data", []) if isinstance(loc_resp, dict) else []
         base_locale_first = detect_base_language(locs_first)
         existing_first = {l.get("attributes", {}).get("locale") for l in locs_first if l.get("attributes", {}).get("locale")}
-        from workflows.iap_translate import _choose_targets
-        global_targets = _choose_targets(ui, list(existing_first), base_locale_first or "", preferred_locales=app_locales)
+        available_targets = {k: v for k, v in APP_STORE_LOCALES.items() if k not in existing_first and k != (base_locale_first or "")}
+        global_targets = choose_target_locales(ui, available_targets, base_locale_first or "", preferred_locales=app_locales, prompt="Select target languages")
 
     for idx, sub in enumerate(targets, 1):
         attrs = sub.get("attributes", {})
@@ -199,11 +191,11 @@ def run(cli) -> bool:
 
         existing_locale_ids: Dict[str, str] = {l.get("attributes", {}).get("locale"): l.get("id") for l in locs if l.get("id")}
         existing_locale_attrs: Dict[str, Dict] = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in locs if l.get("attributes")}
-        from workflows.iap_translate import _choose_targets  # reuse locale selector with defaults
         if global_targets_enabled and global_targets:
             target_locales = [t for t in global_targets if t not in existing_locale_ids]
         else:
-            target_locales = _choose_targets(ui, list(existing_locale_ids.keys()), base_locale, preferred_locales=app_locales)
+            available_targets = {k: v for k, v in APP_STORE_LOCALES.items() if k not in existing_locale_ids and k != base_locale}
+            target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=app_locales, prompt="Select target languages")
         # Always avoid translating the base locale
         target_locales = [t for t in target_locales if t != base_locale]
         if not target_locales:

@@ -20,6 +20,7 @@ from utils import (
     provider_model_info,
     format_progress,
 )
+from workflows.helpers import pick_provider, choose_target_locales, get_app_locales
 
 
 def _select_iaps(ui, asc, app_id: str) -> List[Dict]:
@@ -76,103 +77,6 @@ def _select_iaps(ui, asc, app_id: str) -> List[Dict]:
     return selected_items
 
 
-def _pick_provider(cli):
-    manager = cli.ai_manager
-    ui = cli.ui
-    provs = manager.list_providers()
-    if not provs:
-        print_error("No AI providers configured. Run setup first.")
-        return None, None
-
-    selected_provider = None
-    if len(provs) == 1:
-        selected_provider = provs[0]
-        print_info(f"Using AI provider: {selected_provider}")
-    else:
-        default_provider = getattr(cli, "config", None).get_default_ai_provider() if getattr(cli, "config", None) else None
-        if default_provider and default_provider in provs:
-            use_default = ui.confirm(f"Use default AI provider: {default_provider}?", True)
-            if use_default is None:
-                raw = input(f"Use default provider '{default_provider}'? (Y/n): ").strip().lower()
-                use_default = raw in ("", "y", "yes")
-            if use_default:
-                selected_provider = default_provider
-        if not selected_provider:
-            if ui.available():
-                selected_provider = ui.select(
-                    "Select AI provider",
-                    [{"name": p + ("  (default)" if p == default_provider else ""), "value": p} for p in provs],
-                    add_back=True,
-                )
-            if not selected_provider:
-                for i, p in enumerate(provs, 1):
-                    star = " *" if p == default_provider else ""
-                    print(f"{i}. {p}{star}")
-                raw = input("Select provider (number) (Enter = default): ").strip()
-                if not raw and default_provider and default_provider in provs:
-                    selected_provider = default_provider
-                else:
-                    try:
-                        idx = int(raw)
-                        selected_provider = provs[idx - 1]
-                    except Exception:
-                        print_error("Invalid selection")
-                        return None, None
-    provider = manager.get_provider(selected_provider)
-    return provider, selected_provider
-
-
-def _choose_targets(ui, existing_locales: List[str], base_locale: str, preferred_locales=None) -> List[str]:
-    preferred_locales = set(preferred_locales or [])
-    available_targets = {k: v for k, v in APP_STORE_LOCALES.items() if k not in existing_locales and k != base_locale}
-    if not available_targets:
-        print_warning("All supported languages are already localized for this IAP")
-        return []
-
-    default_checked = {loc for loc in available_targets if loc in preferred_locales}
-
-    if ui.available():
-        choices = [
-            {"name": "🌐 Select all available locales", "value": "__all__"},
-            {"name": "📝 Manual entry (comma-separated locales)", "value": "__manual__"},
-        ]
-        choices += [
-            {"name": f"{loc} - {nm}", "value": loc, "enabled": loc in default_checked}
-            for (loc, nm) in available_targets.items()
-        ]
-        selected = ui.checkbox("Select target languages (Space to toggle, Enter to confirm)", choices, add_back=True) or []
-        if "__all__" in selected:
-            return [loc for loc in available_targets.keys() if loc != base_locale]
-        if "__manual__" in selected:
-            selected = []
-        if selected:
-            return [s for s in selected if s in available_targets]
-        # Manual entry fallback even when TUI is present
-        raw = input("Enter target locales (comma-separated): ").strip()
-        if not raw:
-            return []
-        return [s.strip() for s in raw.split(',') if s.strip() in available_targets]
-
-    # Non-TUI: show in two columns for better visibility
-    print("Available target locales:")
-    items = list(available_targets.items())
-    col_width = 28
-    for i in range(0, len(items), 2):
-        left = items[i]
-        right = items[i + 1] if i + 1 < len(items) else None
-        left_txt = f"{left[0]:8} - {left[1]}".ljust(col_width)
-        right_txt = f"{right[0]:8} - {right[1]}" if right else ""
-        print(f"{left_txt} {right_txt}")
-    default_list = sorted(default_checked)
-    raw = input("Enter target locales (comma-separated, 'all' for every locale, Enter = app locales): ").strip()
-    if not raw:
-        return default_list if default_list else []
-    if raw.lower() in ("all", "*"):
-        return [loc for loc in available_targets.keys() if loc != base_locale]
-    selected = [s.strip() for s in raw.split(',') if s.strip() in available_targets]
-    return selected or default_list
-
-
 def run(cli) -> bool:
     ui = cli.ui
     asc = cli.asc_client
@@ -185,20 +89,13 @@ def run(cli) -> bool:
         return True
 
     # Collect app locales to pre-fill targets
-    app_locales = set()
-    try:
-        latest_ver = asc.get_latest_app_store_version(app_id)
-        if latest_ver:
-            locs = asc.get_app_store_version_localizations(latest_ver).get("data", [])
-            app_locales = {l.get("attributes", {}).get("locale") for l in locs if l.get("attributes", {}).get("locale")}
-    except Exception:
-        app_locales = set()
+    app_locales = get_app_locales(asc, app_id)
 
     selected_iaps = _select_iaps(ui, asc, app_id)
     if not selected_iaps:
         return True
 
-    provider, provider_key = _pick_provider(cli)
+    provider, provider_key = pick_provider(cli)
     if not provider:
         return True
     refine_phrase = (getattr(cli, "config", None).get_prompt_refinement() if getattr(cli, "config", None) else "") or ""
@@ -236,7 +133,11 @@ def run(cli) -> bool:
         print_info(f"Base language: {APP_STORE_LOCALES.get(base_locale, base_locale)} [{base_locale}]")
 
         existing_locale_ids: Dict[str, str] = {l.get("attributes", {}).get("locale"): l.get("id") for l in localizations if l.get("id")}
-        target_locales = _choose_targets(ui, list(existing_locale_ids.keys()), base_locale, preferred_locales=app_locales)
+        available_targets = {k: v for k, v in APP_STORE_LOCALES.items() if k not in existing_locale_ids and k != base_locale}
+        if not available_targets:
+            print_warning("All supported languages are already localized for this IAP")
+            continue
+        target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=app_locales, prompt="Select target languages")
         if not target_locales:
             print_warning("No target languages selected; skipping this IAP")
             continue
