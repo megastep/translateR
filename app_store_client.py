@@ -1212,7 +1212,7 @@ class AppStoreConnectClient:
                 },
             }
         }
-        return self._request("POST", "v1/gameCenterLeaderboardLocalizations", data=data)
+        return self._request("POST", "v1/gameCenterLeaderboardLocalizations", data=data, max_retries=0)
 
     def update_game_center_leaderboard_localization(
         self,
