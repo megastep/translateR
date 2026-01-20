@@ -106,6 +106,10 @@ Character limits are strictly enforced and defined in `utils.FIELD_LIMITS`:
 - IAP Name: 30 chars, IAP Description: 45 chars
 - Subscription Name: 60 chars, Description: 200 chars
 - App Event Name: 30 chars, Short Description: 50 chars, Long Description: 120 chars
+- Game Center Achievement Name: 255 chars, Before Earned Description: 255 chars, After Earned Description: 255 chars
+- Game Center Leaderboard Name: 255 chars, Description: 255 chars
+- Game Center Activity Name: 255 chars, Description: 255 chars
+- Game Center Challenge Name: 255 chars, Description: 255 chars
 
 **Always** call `get_field_limit(field_name)` before passing to AI providers. Providers automatically retry with stricter prompts if limit is exceeded (see `ai_providers.py` retry logic).
 
