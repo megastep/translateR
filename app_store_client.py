@@ -1435,7 +1435,7 @@ class AppStoreConnectClient:
                 },
             }
         }
-        return self._request("POST", "v1/gameCenterChallengeLocalizations", data=data)
+        return self._request("POST", "v1/gameCenterChallengeLocalizations", data=data, max_retries=0)
 
     def update_game_center_challenge_localization(
         self,
