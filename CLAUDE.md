@@ -29,7 +29,7 @@ These are saved to `config/api_keys.json` (gitignored).
 
 ### Running the Tool
 ```bash
-# Interactive CLI with 11 workflows
+# Interactive CLI with 12 workflows
 python3 main.py
 ```
 
