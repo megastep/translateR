@@ -1195,7 +1195,7 @@ class AppStoreConnectClient:
                 },
             }
         }
-        return self._request("POST", "v1/gameCenterAchievementLocalizations", data=data, max_retries=0)
+        return self._request("POST", "v1/gameCenterAchievementLocalizations", data=data)
 
     def update_game_center_achievement_localization(
         self,
@@ -1260,7 +1260,7 @@ class AppStoreConnectClient:
                 },
             }
         }
-        return self._request("POST", "v1/gameCenterLeaderboardLocalizations", data=data, max_retries=0)
+        return self._request("POST", "v1/gameCenterLeaderboardLocalizations", data=data)
 
     def update_game_center_leaderboard_localization(
         self,
@@ -1430,7 +1430,7 @@ class AppStoreConnectClient:
                 },
             }
         }
-        return self._request("POST", "v1/gameCenterActivityLocalizations", data=data, max_retries=0)
+        return self._request("POST", "v1/gameCenterActivityLocalizations", data=data)
 
     def update_game_center_activity_localization(
         self,
@@ -1483,7 +1483,7 @@ class AppStoreConnectClient:
                 },
             }
         }
-        return self._request("POST", "v1/gameCenterChallengeLocalizations", data=data, max_retries=0)
+        return self._request("POST", "v1/gameCenterChallengeLocalizations", data=data)
 
     def update_game_center_challenge_localization(
         self,

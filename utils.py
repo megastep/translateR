@@ -77,6 +77,16 @@ FIELD_LIMITS = {
     "app_event_name": 30,
     "app_event_short_description": 50,
     "app_event_long_description": 120,
+    # Game Center (titles are 30 chars; descriptions ~200 bytes)
+    "game_center_achievement_name": 30,
+    "game_center_achievement_before_description": 200,
+    "game_center_achievement_after_description": 200,
+    "game_center_leaderboard_name": 30,
+    "game_center_leaderboard_description": 200,
+    "game_center_activity_name": 30,
+    "game_center_activity_description": 200,
+    "game_center_challenge_name": 30,
+    "game_center_challenge_description": 200,
 }
 
 

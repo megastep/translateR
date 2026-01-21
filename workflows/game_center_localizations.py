@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 from utils import (
     APP_STORE_LOCALES,
     detect_base_language,
+    get_field_limit,
     print_info,
     print_warning,
     print_error,
@@ -441,14 +442,34 @@ def _select_base_locale(ui, available_locales: List[str], recommended: Optional[
     return None
 
 
-def _translate_required(provider, text: str, language_name: str, refine_phrase: str, seed: Optional[int], field_label: str) -> str:
-    translated = provider.translate(text, language_name, seed=seed, refinement=refine_phrase) or ""
+def _translate_required(
+    provider,
+    text: str,
+    language_name: str,
+    refine_phrase: str,
+    seed: Optional[int],
+    field_label: str,
+    max_length: Optional[int] = None,
+) -> str:
+    translated = provider.translate(
+        text,
+        language_name,
+        max_length=max_length,
+        seed=seed,
+        refinement=refine_phrase,
+    ) or ""
     if translated.strip():
         return translated.strip()
     stronger = (refine_phrase or "").strip()
     extra = f" Do not return an empty string. Return ONLY the translated text for the {field_label}."
     stronger = (stronger + extra).strip() if stronger else extra.strip()
-    translated = provider.translate(text, language_name, seed=seed, refinement=stronger) or ""
+    translated = provider.translate(
+        text,
+        language_name,
+        max_length=max_length,
+        seed=seed,
+        refinement=stronger,
+    ) or ""
     return translated.strip()
 
 
@@ -713,12 +734,40 @@ def run(cli) -> bool:
                 print_error("Base localization missing required fields (name/before/after); skipping")
                 continue
 
+            name_limit = get_field_limit("game_center_achievement_name")
+            before_limit = get_field_limit("game_center_achievement_before_description")
+            after_limit = get_field_limit("game_center_achievement_after_description")
+
             def _task(loc: str):
                 language_name = APP_STORE_LOCALES.get(loc, loc)
                 translated = {
-                    "name": _translate_required(provider, base_name, language_name, refine_phrase, seed, "name"),
-                    "before": _translate_required(provider, base_before, language_name, refine_phrase, seed, "before-earned description"),
-                    "after": _translate_required(provider, base_after, language_name, refine_phrase, seed, "after-earned description"),
+                    "name": _translate_required(
+                        provider,
+                        base_name,
+                        language_name,
+                        refine_phrase,
+                        seed,
+                        "name",
+                        max_length=name_limit,
+                    ),
+                    "before": _translate_required(
+                        provider,
+                        base_before,
+                        language_name,
+                        refine_phrase,
+                        seed,
+                        "before-earned description",
+                        max_length=before_limit,
+                    ),
+                    "after": _translate_required(
+                        provider,
+                        base_after,
+                        language_name,
+                        refine_phrase,
+                        seed,
+                        "after-earned description",
+                        max_length=after_limit,
+                    ),
                 }
                 time.sleep(1)
                 return translated
@@ -793,7 +842,7 @@ def run(cli) -> bool:
                     result, err, image_id = _copy_localization_image(asc, kind, origin_payload, target_loc_id, version_id)
                     if result == "commit_failed":
                         print_error(f"  ❌ Image commit failed for {language_name}: {err}")
-                    if result not in ("upload_complete", "target_has_image", "commit_failed"):
+                    elif result not in ("upload_complete", "target_has_image", "commit_failed"):
                         detail = f" ({err})" if err else ""
                         print_warning(f"  ⚠️  Image copy skipped for {language_name}: {result}{detail}")
                 completed += 1
@@ -826,13 +875,46 @@ def run(cli) -> bool:
                 print_error("Base localization missing required name; skipping")
                 continue
 
+            name_limit = get_field_limit("game_center_leaderboard_name")
+            desc_limit = get_field_limit("game_center_leaderboard_description")
+
             def _task(loc: str):
                 language_name = APP_STORE_LOCALES.get(loc, loc)
                 translated = {
-                    "name": _translate_required(provider, base_name, language_name, refine_phrase, seed, "name"),
-                    "description": provider.translate(base_desc, language_name, seed=seed, refinement=refine_phrase).strip() if base_desc else "",
-                    "formatterSuffix": provider.translate(base_suffix, language_name, seed=seed, refinement=refine_phrase).strip() if base_suffix else "",
-                    "formatterSuffixSingular": provider.translate(base_suffix_singular, language_name, seed=seed, refinement=refine_phrase).strip() if base_suffix_singular else "",
+                    "name": _translate_required(
+                        provider,
+                        base_name,
+                        language_name,
+                        refine_phrase,
+                        seed,
+                        "name",
+                        max_length=name_limit,
+                    ),
+                    "description": provider.translate(
+                        base_desc,
+                        language_name,
+                        max_length=desc_limit,
+                        seed=seed,
+                        refinement=refine_phrase,
+                    ).strip()
+                    if base_desc
+                    else "",
+                    "formatterSuffix": provider.translate(
+                        base_suffix,
+                        language_name,
+                        seed=seed,
+                        refinement=refine_phrase,
+                    ).strip()
+                    if base_suffix
+                    else "",
+                    "formatterSuffixSingular": provider.translate(
+                        base_suffix_singular,
+                        language_name,
+                        seed=seed,
+                        refinement=refine_phrase,
+                    ).strip()
+                    if base_suffix_singular
+                    else "",
                 }
                 time.sleep(1)
                 return translated
@@ -912,7 +994,7 @@ def run(cli) -> bool:
                     result, err, image_id = _copy_localization_image(asc, kind, origin_payload, target_loc_id, version_id)
                     if result == "commit_failed":
                         print_error(f"  ❌ Image commit failed for {language_name}: {err}")
-                    if result not in ("upload_complete", "target_has_image", "commit_failed"):
+                    elif result not in ("upload_complete", "target_has_image", "commit_failed"):
                         detail = f" ({err})" if err else ""
                         print_warning(f"  ⚠️  Image copy skipped for {language_name}: {result}{detail}")
                 completed += 1
@@ -944,11 +1026,34 @@ def run(cli) -> bool:
                 print_error("Missing version id for localized item; skipping")
                 continue
 
+            if kind == "activity":
+                name_limit = get_field_limit("game_center_activity_name")
+                desc_limit = get_field_limit("game_center_activity_description")
+            else:
+                name_limit = get_field_limit("game_center_challenge_name")
+                desc_limit = get_field_limit("game_center_challenge_description")
+
             def _task(loc: str):
                 language_name = APP_STORE_LOCALES.get(loc, loc)
                 translated = {
-                    "name": _translate_required(provider, base_name, language_name, refine_phrase, seed, "name"),
-                    "description": provider.translate(base_desc, language_name, seed=seed, refinement=refine_phrase).strip() if base_desc else "",
+                    "name": _translate_required(
+                        provider,
+                        base_name,
+                        language_name,
+                        refine_phrase,
+                        seed,
+                        "name",
+                        max_length=name_limit,
+                    ),
+                    "description": provider.translate(
+                        base_desc,
+                        language_name,
+                        max_length=desc_limit,
+                        seed=seed,
+                        refinement=refine_phrase,
+                    ).strip()
+                    if base_desc
+                    else "",
                 }
                 time.sleep(1)
                 return translated
@@ -1038,7 +1143,7 @@ def run(cli) -> bool:
                     result, err, image_id = _copy_localization_image(asc, kind, origin_payload, target_loc_id, version_id)
                     if result == "commit_failed":
                         print_error(f"  ❌ Image commit failed for {language_name}: {err}")
-                    if result not in ("upload_complete", "target_has_image", "commit_failed"):
+                    elif result not in ("upload_complete", "target_has_image", "commit_failed"):
                         detail = f" ({err})" if err else ""
                         print_warning(f"  ⚠️  Image copy skipped for {language_name}: {result}{detail}")
                 completed += 1
