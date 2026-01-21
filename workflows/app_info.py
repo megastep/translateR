@@ -7,12 +7,12 @@ from typing import Dict
 import time
 
 from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, format_progress, parallel_map_locales, provider_model_info
+from workflows.helpers import pick_provider, choose_target_locales
 
 
 def run(cli) -> bool:
     ui = cli.ui
     asc = cli.asc_client
-    manager = cli.ai_manager
 
     print_info("App Name & Subtitle Mode - Translate app name and subtitle")
 
@@ -58,57 +58,21 @@ def run(cli) -> bool:
         return True
 
     # Targets
-    available_targets = [loc for loc in APP_STORE_LOCALES if loc not in loc_map]
-    if ui.available():
-        choices = [{"name": f"{loc} ({APP_STORE_LOCALES[loc]})", "value": loc} for loc in available_targets]
-        target_locales = ui.checkbox("Select target languages (Space to toggle, Enter to confirm)", choices, add_back=True)
-        if not target_locales:
-            print_warning("No target languages selected")
-            return True
-    else:
-        print(", ".join([f"{l} ({APP_STORE_LOCALES[l]})" for l in available_targets[:10]]))
-        raw = input("Enter target locales (comma-separated): ").strip()
-        if not raw:
-            print_warning("No target languages selected")
-            return True
-        target_locales = [s.strip() for s in raw.split(',') if s.strip() in available_targets]
-        if not target_locales:
-            print_warning("No valid locales selected")
-            return True
+    available_targets = {loc: APP_STORE_LOCALES[loc] for loc in APP_STORE_LOCALES if loc not in loc_map}
+    target_locales = choose_target_locales(
+        ui,
+        available_targets,
+        base_locale,
+        preferred_locales=None,
+        prompt="Select target languages",
+    )
+    if not target_locales:
+        print_warning("No target languages selected")
+        return True
 
-    # Provider
-    provs = manager.list_providers()
-    selected_provider = None
-    if len(provs) == 1:
-        selected_provider = provs[0]
-        print_info(f"Using AI provider: {selected_provider}")
-    else:
-        default_provider = getattr(cli, 'config', None).get_default_ai_provider() if getattr(cli, 'config', None) else None
-        if default_provider and default_provider in provs:
-            use_default = ui.confirm(f"Use default AI provider: {default_provider}?", True)
-            if use_default is None:
-                raw = input(f"Use default provider '{default_provider}'? (Y/n): ").strip().lower()
-                use_default = raw in ("", "y", "yes")
-            if use_default:
-                selected_provider = default_provider
-        if not selected_provider:
-            if ui.available():
-                selected_provider = ui.select("Select AI provider", [{"name": p + ("  (default)" if p == default_provider else ""), "value": p} for p in provs], add_back=True)
-            if not selected_provider:
-                for i, p in enumerate(provs, 1):
-                    star = " *" if p == default_provider else ""
-                    print(f"{i}. {p}{star}")
-                raw = input("Select provider (number) (Enter = default): ").strip()
-                if not raw and default_provider and default_provider in provs:
-                    selected_provider = default_provider
-                else:
-                    try:
-                        idx = int(raw)
-                        selected_provider = provs[idx - 1]
-                    except Exception:
-                        print_error("Invalid selection")
-                        return True
-    provider = manager.get_provider(selected_provider)
+    provider, selected_provider = pick_provider(cli)
+    if not provider:
+        return True
     # Use global refinement (no per-run prompt here; free text not requested)
     refine_phrase = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
     # Show provider/model and choose seed

@@ -6,6 +6,7 @@ app metadata and localizations.
 """
 
 import jwt
+import json
 import time
 import requests
 from typing import Dict, Any, Optional, List
@@ -60,6 +61,20 @@ class AppStoreConnectClient:
             "Authorization": f"Bearer {self._generate_token()}",
             "Content-Type": "application/json"
         }
+
+        def _safe_preview(value: Any, limit: int = 400) -> str:
+            if value is None:
+                return "None"
+            try:
+                txt = json.dumps(value, ensure_ascii=True, default=str)
+            except Exception:
+                try:
+                    txt = repr(value)
+                except Exception:
+                    return "<unprintable>"
+            if len(txt) > limit:
+                return txt[:limit] + "…"
+            return txt
         if endpoint.startswith("v2/"):
             url = f"https://api.appstoreconnect.apple.com/{endpoint}"
         elif endpoint.startswith("v1/"):
@@ -73,13 +88,46 @@ class AppStoreConnectClient:
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.HTTPError as e:
-                if response.status_code == 409 and attempt < max_retries:
+                status = response.status_code
+                if status == 409 and attempt < max_retries:
                     # Conflict error - retry with exponential backoff
                     wait_time = (2 ** attempt) + random.uniform(0, 1)
-                    print(f"⚠️  API conflict detected for {url} (params={params}, data={data}), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
+                    print(f"⚠️  API conflict detected for {url} (params={_safe_preview(params)}, data={_safe_preview(data)}), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
+                    time.sleep(wait_time)
+                    continue
+                if status >= 500 and status <= 599 and attempt < max_retries:
+                    # Server error - retry with exponential backoff (respect Retry-After if provided)
+                    retry_after = response.headers.get("Retry-After")
+                    try:
+                        wait_time = float(retry_after)
+                    except Exception:
+                        wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    req_id = response.headers.get("x-request-id") or response.headers.get("request-id") or response.headers.get("X-Request-Id")
+                    body_excerpt = ""
+                    try:
+                        text = response.text or ""
+                        body_excerpt = text[:300].replace("\n", " ").strip()
+                    except Exception:
+                        body_excerpt = ""
+                    detail = f", request_id={req_id}" if req_id else ""
+                    if body_excerpt:
+                        detail += f", body=\"{body_excerpt}\""
+                    print(f"⚠️  Server error {status} for {url} (params={_safe_preview(params)}, data={_safe_preview(data)}){detail}, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
                     time.sleep(wait_time)
                     continue
                 else:
+                    if status >= 500 and status <= 599:
+                        req_id = response.headers.get("x-request-id") or response.headers.get("request-id") or response.headers.get("X-Request-Id")
+                        body_excerpt = ""
+                        try:
+                            text = response.text or ""
+                            body_excerpt = text[:300].replace("\n", " ").strip()
+                        except Exception:
+                            body_excerpt = ""
+                        detail = f", request_id={req_id}" if req_id else ""
+                        if body_excerpt:
+                            detail += f", body=\"{body_excerpt}\""
+                        print(f"❌ Server error {status} for {url} (params={_safe_preview(params)}, data={_safe_preview(data)}){detail}")
                     raise e
     
     def get_apps(self, limit: int = 200) -> Any:
@@ -900,4 +948,563 @@ class AppStoreConnectClient:
             }
         }
         return self._request("PATCH", f"v1/appEventLocalizations/{localization_id}", data=data, max_retries=0)
+
+    # ----------------------
+    # Game Center
+    # ----------------------
+
+    def get_game_center_detail(self, app_id: str) -> Any:
+        """Get the Game Center detail for an app."""
+        return self._request("GET", f"v1/apps/{app_id}/gameCenterDetail")
+
+    def get_game_center_group(self, detail_id: str) -> Any:
+        """Get the Game Center group for a Game Center detail."""
+        return self._request("GET", f"v1/gameCenterDetails/{detail_id}/gameCenterGroup")
+
+    def get_game_center_achievements(self, detail_id: str, limit: int = 200) -> Any:
+        """List Game Center achievements for a Game Center detail."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterDetails/{detail_id}/gameCenterAchievements", params=params)
+
+    def get_game_center_leaderboards(self, detail_id: str, limit: int = 200) -> Any:
+        """List Game Center leaderboards for a Game Center detail."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterDetails/{detail_id}/gameCenterLeaderboards", params=params)
+
+    def get_game_center_activities(self, detail_id: str, limit: int = 200) -> Any:
+        """List Game Center activities for a Game Center detail."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterDetails/{detail_id}/gameCenterActivities", params=params)
+
+    def get_game_center_challenges(self, detail_id: str, limit: int = 200) -> Any:
+        """List Game Center challenges for a Game Center detail."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterDetails/{detail_id}/gameCenterChallenges", params=params)
+
+    def get_game_center_group_achievements(self, group_id: str, limit: int = 200) -> Any:
+        """List Game Center achievements for a Game Center group."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterGroups/{group_id}/gameCenterAchievements", params=params)
+
+    def get_game_center_group_leaderboards(self, group_id: str, limit: int = 200) -> Any:
+        """List Game Center leaderboards for a Game Center group."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterGroups/{group_id}/gameCenterLeaderboards", params=params)
+
+    def get_game_center_group_activities(self, group_id: str, limit: int = 200) -> Any:
+        """List Game Center activities for a Game Center group."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterGroups/{group_id}/gameCenterActivities", params=params)
+
+    def get_game_center_group_challenges(self, group_id: str, limit: int = 200) -> Any:
+        """List Game Center challenges for a Game Center group."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterGroups/{group_id}/gameCenterChallenges", params=params)
+
+    def get_game_center_achievement_localizations(self, achievement_id: str, limit: int = 200) -> Any:
+        """Get localizations for a specific Game Center achievement."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterAchievements/{achievement_id}/localizations", params=params)
+
+    def get_game_center_leaderboard_localizations(self, leaderboard_id: str, limit: int = 200) -> Any:
+        """Get localizations for a specific Game Center leaderboard."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterLeaderboards/{leaderboard_id}/localizations", params=params)
+
+    def get_game_center_achievement_localization_image(self, localization_id: str) -> Any:
+        """Get the image for a Game Center achievement localization."""
+        params = {"fields[gameCenterAchievementImages]": "imageAsset,fileName,fileSize,uploadOperations"}
+        return self._request(
+            "GET",
+            f"v1/gameCenterAchievementLocalizations/{localization_id}/gameCenterAchievementImage",
+            params=params,
+        )
+
+    def get_game_center_achievement_localization_image_linkage(self, localization_id: str) -> Any:
+        """Get the image linkage for a Game Center achievement localization."""
+        return self._request(
+            "GET",
+            f"v1/gameCenterAchievementLocalizations/{localization_id}/relationships/gameCenterAchievementImage",
+        )
+
+    def get_game_center_achievement_image(self, image_id: str) -> Any:
+        """Get a Game Center achievement image by id."""
+        params = {"fields[gameCenterAchievementImages]": "imageAsset,fileName,fileSize,uploadOperations"}
+        return self._request("GET", f"v1/gameCenterAchievementImages/{image_id}", params=params)
+
+    def get_game_center_leaderboard_localization_image(self, localization_id: str) -> Any:
+        """Get the image for a Game Center leaderboard localization."""
+        params = {"fields[gameCenterLeaderboardImages]": "imageAsset,fileName,fileSize,uploadOperations"}
+        return self._request(
+            "GET",
+            f"v1/gameCenterLeaderboardLocalizations/{localization_id}/gameCenterLeaderboardImage",
+            params=params,
+        )
+
+    def get_game_center_leaderboard_localization_image_linkage(self, localization_id: str) -> Any:
+        """Get the image linkage for a Game Center leaderboard localization."""
+        return self._request(
+            "GET",
+            f"v1/gameCenterLeaderboardLocalizations/{localization_id}/relationships/gameCenterLeaderboardImage",
+        )
+
+    def get_game_center_leaderboard_image(self, image_id: str) -> Any:
+        """Get a Game Center leaderboard image by id."""
+        params = {"fields[gameCenterLeaderboardImages]": "imageAsset,fileName,fileSize,uploadOperations"}
+        return self._request("GET", f"v1/gameCenterLeaderboardImages/{image_id}", params=params)
+
+    def get_game_center_activity_localization_image(self, localization_id: str) -> Any:
+        """Get the image for a Game Center activity localization."""
+        params = {"fields[gameCenterActivityImages]": "imageAsset,fileName,fileSize,uploadOperations"}
+        return self._request(
+            "GET",
+            f"v1/gameCenterActivityLocalizations/{localization_id}/image",
+            params=params,
+        )
+
+    def get_game_center_activity_localization_image_linkage(self, localization_id: str) -> Any:
+        """Get the image linkage for a Game Center activity localization."""
+        return self._request(
+            "GET",
+            f"v1/gameCenterActivityLocalizations/{localization_id}/relationships/image",
+        )
+
+    def get_game_center_activity_image(self, image_id: str) -> Any:
+        """Get a Game Center activity image by id."""
+        params = {"fields[gameCenterActivityImages]": "imageAsset,fileName,fileSize,uploadOperations"}
+        return self._request("GET", f"v1/gameCenterActivityImages/{image_id}", params=params)
+
+    def get_game_center_challenge_localization_image(self, localization_id: str) -> Any:
+        """Get the image for a Game Center challenge localization."""
+        params = {"fields[gameCenterChallengeImages]": "imageAsset,fileName,fileSize,uploadOperations"}
+        return self._request(
+            "GET",
+            f"v1/gameCenterChallengeLocalizations/{localization_id}/image",
+            params=params,
+        )
+
+    def get_game_center_challenge_localization_image_linkage(self, localization_id: str) -> Any:
+        """Get the image linkage for a Game Center challenge localization."""
+        return self._request(
+            "GET",
+            f"v1/gameCenterChallengeLocalizations/{localization_id}/relationships/image",
+        )
+
+    def get_game_center_challenge_image(self, image_id: str) -> Any:
+        """Get a Game Center challenge image by id."""
+        params = {"fields[gameCenterChallengeImages]": "imageAsset,fileName,fileSize,uploadOperations"}
+        return self._request("GET", f"v1/gameCenterChallengeImages/{image_id}", params=params)
+
+    def update_game_center_achievement_image(self, image_id: str, uploaded: bool = True) -> Any:
+        """Update/commit a Game Center achievement image after upload."""
+        data = {
+            "data": {
+                "type": "gameCenterAchievementImages",
+                "id": image_id,
+                "attributes": {
+                    "uploaded": uploaded
+                }
+            }
+        }
+        return self._request("PATCH", f"v1/gameCenterAchievementImages/{image_id}", data=data)
+
+    def update_game_center_leaderboard_image(self, image_id: str, uploaded: bool = True) -> Any:
+        """Update/commit a Game Center leaderboard image after upload."""
+        data = {
+            "data": {
+                "type": "gameCenterLeaderboardImages",
+                "id": image_id,
+                "attributes": {
+                    "uploaded": uploaded
+                }
+            }
+        }
+        return self._request("PATCH", f"v1/gameCenterLeaderboardImages/{image_id}", data=data)
+
+    def update_game_center_activity_image(self, image_id: str, uploaded: bool = True) -> Any:
+        """Update/commit a Game Center activity image after upload."""
+        data = {
+            "data": {
+                "type": "gameCenterActivityImages",
+                "id": image_id,
+                "attributes": {
+                    "uploaded": uploaded
+                }
+            }
+        }
+        return self._request("PATCH", f"v1/gameCenterActivityImages/{image_id}", data=data)
+
+    def update_game_center_challenge_image(self, image_id: str, uploaded: bool = True) -> Any:
+        """Update/commit a Game Center challenge image after upload."""
+        data = {
+            "data": {
+                "type": "gameCenterChallengeImages",
+                "id": image_id,
+                "attributes": {
+                    "uploaded": uploaded
+                }
+            }
+        }
+        return self._request("PATCH", f"v1/gameCenterChallengeImages/{image_id}", data=data)
+
+    def get_game_center_activity_versions(self, activity_id: str, limit: int = 200) -> Any:
+        """List versions for a Game Center activity."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterActivities/{activity_id}/versions", params=params)
+
+    def get_game_center_challenge_versions(self, challenge_id: str, limit: int = 200) -> Any:
+        """List versions for a Game Center challenge."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterChallenges/{challenge_id}/versions", params=params)
+
+    def get_game_center_activity_version_localizations(self, version_id: str, limit: int = 200) -> Any:
+        """Get localizations for a Game Center activity version."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterActivityVersions/{version_id}/localizations", params=params)
+
+    def get_game_center_challenge_version_localizations(self, version_id: str, limit: int = 200) -> Any:
+        """Get localizations for a Game Center challenge version."""
+        params = {"limit": max(1, min(limit, 200))}
+        return self._request("GET", f"v1/gameCenterChallengeVersions/{version_id}/localizations", params=params)
+
+    def create_game_center_achievement_localization(
+        self,
+        achievement_id: str,
+        locale: str,
+        name: str,
+        before_earned_description: str,
+        after_earned_description: str,
+    ) -> Any:
+        """Create a localization for a Game Center achievement."""
+        data = {
+            "data": {
+                "type": "gameCenterAchievementLocalizations",
+                "attributes": {
+                    "locale": locale,
+                    "name": name,
+                    "beforeEarnedDescription": before_earned_description,
+                    "afterEarnedDescription": after_earned_description,
+                },
+                "relationships": {
+                    "gameCenterAchievement": {
+                        "data": {
+                            "type": "gameCenterAchievements",
+                            "id": achievement_id,
+                        }
+                    }
+                },
+            }
+        }
+        return self._request("POST", "v1/gameCenterAchievementLocalizations", data=data)
+
+    def update_game_center_achievement_localization(
+        self,
+        localization_id: str,
+        name: Optional[str] = None,
+        before_earned_description: Optional[str] = None,
+        after_earned_description: Optional[str] = None,
+    ) -> Any:
+        """Update an existing Game Center achievement localization."""
+        attrs: Dict[str, Any] = {}
+        if name is not None:
+            attrs["name"] = name
+        if before_earned_description is not None:
+            attrs["beforeEarnedDescription"] = before_earned_description
+        if after_earned_description is not None:
+            attrs["afterEarnedDescription"] = after_earned_description
+        if not attrs:
+            return self._request("GET", f"v1/gameCenterAchievementLocalizations/{localization_id}")
+        data = {
+            "data": {
+                "type": "gameCenterAchievementLocalizations",
+                "id": localization_id,
+                "attributes": attrs,
+            }
+        }
+        return self._request("PATCH", f"v1/gameCenterAchievementLocalizations/{localization_id}", data=data)
+
+    def create_game_center_leaderboard_localization(
+        self,
+        leaderboard_id: str,
+        locale: str,
+        name: str,
+        description: Optional[str] = None,
+        formatter_suffix: Optional[str] = None,
+        formatter_suffix_singular: Optional[str] = None,
+        formatter_override: Optional[str] = None,
+    ) -> Any:
+        """Create a localization for a Game Center leaderboard."""
+        attrs: Dict[str, Any] = {
+            "locale": locale,
+            "name": name,
+        }
+        if description is not None:
+            attrs["description"] = description
+        if formatter_suffix is not None:
+            attrs["formatterSuffix"] = formatter_suffix
+        if formatter_suffix_singular is not None:
+            attrs["formatterSuffixSingular"] = formatter_suffix_singular
+        if formatter_override is not None:
+            attrs["formatterOverride"] = formatter_override
+        data = {
+            "data": {
+                "type": "gameCenterLeaderboardLocalizations",
+                "attributes": attrs,
+                "relationships": {
+                    "gameCenterLeaderboard": {
+                        "data": {
+                            "type": "gameCenterLeaderboards",
+                            "id": leaderboard_id,
+                        }
+                    }
+                },
+            }
+        }
+        return self._request("POST", "v1/gameCenterLeaderboardLocalizations", data=data)
+
+    def update_game_center_leaderboard_localization(
+        self,
+        localization_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        formatter_suffix: Optional[str] = None,
+        formatter_suffix_singular: Optional[str] = None,
+        formatter_override: Optional[str] = None,
+    ) -> Any:
+        """Update an existing Game Center leaderboard localization."""
+        attrs: Dict[str, Any] = {}
+        if name is not None:
+            attrs["name"] = name
+        if description is not None:
+            attrs["description"] = description
+        if formatter_suffix is not None:
+            attrs["formatterSuffix"] = formatter_suffix
+        if formatter_suffix_singular is not None:
+            attrs["formatterSuffixSingular"] = formatter_suffix_singular
+        if formatter_override is not None:
+            attrs["formatterOverride"] = formatter_override
+        if not attrs:
+            return self._request("GET", f"v1/gameCenterLeaderboardLocalizations/{localization_id}")
+        data = {
+            "data": {
+                "type": "gameCenterLeaderboardLocalizations",
+                "id": localization_id,
+                "attributes": attrs,
+            }
+        }
+        return self._request("PATCH", f"v1/gameCenterLeaderboardLocalizations/{localization_id}", data=data)
+
+    def create_game_center_achievement_image(self, localization_id: str, file_name: str, file_size: int) -> Any:
+        """Create an image resource for a Game Center achievement localization."""
+        data = {
+            "data": {
+                "type": "gameCenterAchievementImages",
+                "attributes": {
+                    "fileName": file_name,
+                    "fileSize": file_size,
+                },
+                "relationships": {
+                    "gameCenterAchievementLocalization": {
+                        "data": {
+                            "type": "gameCenterAchievementLocalizations",
+                            "id": localization_id,
+                        }
+                    }
+                },
+            }
+        }
+        return self._request("POST", "v1/gameCenterAchievementImages", data=data)
+
+    def create_game_center_leaderboard_image(self, localization_id: str, file_name: str, file_size: int) -> Any:
+        """Create an image resource for a Game Center leaderboard localization."""
+        data = {
+            "data": {
+                "type": "gameCenterLeaderboardImages",
+                "attributes": {
+                    "fileName": file_name,
+                    "fileSize": file_size,
+                },
+                "relationships": {
+                    "gameCenterLeaderboardLocalization": {
+                        "data": {
+                            "type": "gameCenterLeaderboardLocalizations",
+                            "id": localization_id,
+                        }
+                    }
+                },
+            }
+        }
+        return self._request("POST", "v1/gameCenterLeaderboardImages", data=data)
+
+    def create_game_center_activity_image(
+        self,
+        localization_id: str,
+        version_id: str,
+        file_name: str,
+        file_size: int,
+    ) -> Any:
+        """Create an image resource for a Game Center activity localization."""
+        data = {
+            "data": {
+                "type": "gameCenterActivityImages",
+                "attributes": {
+                    "fileName": file_name,
+                    "fileSize": file_size,
+                },
+                "relationships": {
+                    "localization": {
+                        "data": {
+                            "type": "gameCenterActivityLocalizations",
+                            "id": localization_id,
+                        }
+                    },
+                    "version": {
+                        "data": {
+                            "type": "gameCenterActivityVersions",
+                            "id": version_id,
+                        }
+                    },
+                },
+            }
+        }
+        return self._request("POST", "v1/gameCenterActivityImages", data=data)
+
+    def create_game_center_challenge_image(
+        self,
+        localization_id: str,
+        version_id: str,
+        file_name: str,
+        file_size: int,
+    ) -> Any:
+        """Create an image resource for a Game Center challenge localization."""
+        data = {
+            "data": {
+                "type": "gameCenterChallengeImages",
+                "attributes": {
+                    "fileName": file_name,
+                    "fileSize": file_size,
+                },
+                "relationships": {
+                    "localization": {
+                        "data": {
+                            "type": "gameCenterChallengeLocalizations",
+                            "id": localization_id,
+                        }
+                    },
+                    "version": {
+                        "data": {
+                            "type": "gameCenterChallengeVersions",
+                            "id": version_id,
+                        }
+                    },
+                },
+            }
+        }
+        return self._request("POST", "v1/gameCenterChallengeImages", data=data)
+
+    def create_game_center_activity_localization(
+        self,
+        version_id: str,
+        locale: str,
+        name: str,
+        description: Optional[str] = None,
+    ) -> Any:
+        """Create a localization for a Game Center activity version."""
+        attrs: Dict[str, Any] = {
+            "locale": locale,
+            "name": name,
+        }
+        if description is not None:
+            attrs["description"] = description
+        data = {
+            "data": {
+                "type": "gameCenterActivityLocalizations",
+                "attributes": attrs,
+                "relationships": {
+                    "version": {
+                        "data": {
+                            "type": "gameCenterActivityVersions",
+                            "id": version_id,
+                        }
+                    }
+                },
+            }
+        }
+        return self._request("POST", "v1/gameCenterActivityLocalizations", data=data)
+
+    def update_game_center_activity_localization(
+        self,
+        localization_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Any:
+        """Update an existing Game Center activity localization."""
+        attrs: Dict[str, Any] = {}
+        if name is not None:
+            attrs["name"] = name
+        if description is not None:
+            attrs["description"] = description
+        if not attrs:
+            return self._request("GET", f"v1/gameCenterActivityLocalizations/{localization_id}")
+        data = {
+            "data": {
+                "type": "gameCenterActivityLocalizations",
+                "id": localization_id,
+                "attributes": attrs,
+            }
+        }
+        return self._request("PATCH", f"v1/gameCenterActivityLocalizations/{localization_id}", data=data)
+
+    def create_game_center_challenge_localization(
+        self,
+        version_id: str,
+        locale: str,
+        name: str,
+        description: Optional[str] = None,
+    ) -> Any:
+        """Create a localization for a Game Center challenge version."""
+        attrs: Dict[str, Any] = {
+            "locale": locale,
+            "name": name,
+        }
+        if description is not None:
+            attrs["description"] = description
+        data = {
+            "data": {
+                "type": "gameCenterChallengeLocalizations",
+                "attributes": attrs,
+                "relationships": {
+                    "version": {
+                        "data": {
+                            "type": "gameCenterChallengeVersions",
+                            "id": version_id,
+                        }
+                    }
+                },
+            }
+        }
+        return self._request("POST", "v1/gameCenterChallengeLocalizations", data=data)
+
+    def update_game_center_challenge_localization(
+        self,
+        localization_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Any:
+        """Update an existing Game Center challenge localization."""
+        attrs: Dict[str, Any] = {}
+        if name is not None:
+            attrs["name"] = name
+        if description is not None:
+            attrs["description"] = description
+        if not attrs:
+            return self._request("GET", f"v1/gameCenterChallengeLocalizations/{localization_id}")
+        data = {
+            "data": {
+                "type": "gameCenterChallengeLocalizations",
+                "id": localization_id,
+                "attributes": attrs,
+            }
+        }
+        return self._request("PATCH", f"v1/gameCenterChallengeLocalizations/{localization_id}", data=data)
     

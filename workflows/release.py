@@ -9,6 +9,7 @@ import textwrap
 from release_presets import list_presets, ReleaseNotePreset
 
 from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source, build_refinement_template, parse_refinement_template
+from workflows.helpers import pick_provider, select_platform_versions
 
 
 def _preset_preview_text(preset: ReleaseNotePreset, base_locale: str) -> str:
@@ -66,61 +67,6 @@ def prompt_preset_selection(ui, presets: List[ReleaseNotePreset], base_locale: s
         return filtered[idx - 1], False
     print_error("Invalid selection")
     return None, False
-
-
-def select_platform_versions(ui, asc_client, app_id: str):
-    versions_resp = asc_client._request("GET", f"apps/{app_id}/appStoreVersions")
-    versions = versions_resp.get("data", [])
-    if not versions:
-        print_error("No App Store versions found for this app")
-        return None, None, None
-
-    latest_by_platform: Dict[str, dict] = {}
-    for v in versions:
-        attrs = v.get("attributes", {})
-        plat = attrs.get("platform", "UNKNOWN")
-        if plat not in latest_by_platform:
-            latest_by_platform[plat] = v
-
-    plat_label = {"IOS": "iOS", "MAC_OS": "macOS", "TV_OS": "tvOS", "VISION_OS": "visionOS", "UNKNOWN": "Unknown"}
-
-    selected_versions: Dict[str, dict] = {}
-    if ui.available():
-        choices = []
-        for plat, v in latest_by_platform.items():
-            attrs = v.get("attributes", {})
-            name = f"{plat_label.get(plat, plat)} v{attrs.get('versionString', 'Unknown')} ({attrs.get('appStoreState', 'Unknown')})"
-            choices.append({"name": name, "value": plat, "enabled": True})
-        picked = ui.checkbox("Select platforms to update (Space to toggle, Enter to confirm)", choices, add_back=True)
-        if not picked:
-            print_info("Cancelled")
-            return None, None, None
-        for plat in picked:
-            selected_versions[plat] = latest_by_platform[plat]
-    else:
-        print("Available platforms:")
-        plats = list(latest_by_platform.keys())
-        for i, plat in enumerate(plats, 1):
-            attrs = latest_by_platform[plat].get("attributes", {})
-            print(f"{i}. {plat_label.get(plat, plat)} v{attrs.get('versionString', 'Unknown')} ({attrs.get('appStoreState', 'Unknown')})")
-        raw = input("Select platforms (comma numbers) or Enter for all, 'b' to back: ").strip().lower()
-        if raw == 'b':
-            print_info("Cancelled")
-            return None, None, None
-        if not raw:
-            picked_idx = list(range(1, len(plats) + 1))
-        else:
-            try:
-                picked_idx = [int(x.strip()) for x in raw.split(',')]
-            except ValueError:
-                print_error("Invalid selection")
-                return None, None, None
-        for idx in picked_idx:
-            if 1 <= idx <= len(plats):
-                plat = plats[idx - 1]
-                selected_versions[plat] = latest_by_platform[plat]
-
-    return selected_versions, latest_by_platform, plat_label
 
 
 def detect_base_language(localizations: List[Dict]) -> Optional[str]:
@@ -356,55 +302,14 @@ def run(cli) -> bool:
     # Translate + review loop
     limit = get_field_limit("whats_new") or 4000
     translations: Dict[str, str] = {}
-    provs = providers.list_providers()
-    default_provider = getattr(cli, 'config', None).get_default_ai_provider() if getattr(cli, 'config', None) else None
     selected_provider: Optional[str] = None
     provider = None
 
     while True:
         if selected_preset is None and provider is None and target_locales:
-            if not provs:
-                print_error("No AI providers configured. Please run setup.")
+            provider, selected_provider = pick_provider(cli)
+            if not provider:
                 return True
-            if len(provs) == 1:
-                selected_provider = provs[0]
-                print_info(f"Using AI provider: {selected_provider}")
-            else:
-                # Offer to use configured default provider if set
-                if default_provider and default_provider in provs:
-                    use_default = ui.confirm(f"Use default AI provider: {default_provider}?", True)
-                    if use_default is None:
-                        raw = input(f"Use default provider '{default_provider}'? (Y/n): ").strip().lower()
-                        use_default = raw in ("", "y", "yes")
-                    if use_default:
-                        selected_provider = default_provider
-                if not selected_provider:
-                    if ui.available():
-                        choices = [{"name": p + ("  (default)" if p == default_provider else ""), "value": p} for p in provs]
-                        selected_provider = ui.select("Select AI provider", choices, add_back=True)
-                    if not selected_provider:
-                        print("Available AI providers:")
-                        for i, p in enumerate(provs, 1):
-                            star = " *" if p == default_provider else ""
-                            print(f"{i}. {p}{star}")
-                        raw = input("Select provider (number) or 'b' to go back (Enter = default): ").strip().lower()
-                        if raw == 'b':
-                            print_info("Cancelled")
-                            return True
-                        if not raw and default_provider and default_provider in provs:
-                            selected_provider = default_provider
-                        else:
-                            try:
-                                idx = int(raw)
-                                if 1 <= idx <= len(provs):
-                                    selected_provider = provs[idx - 1]
-                                else:
-                                    print_error("Invalid choice")
-                                    return True
-                            except ValueError:
-                                print_error("Please enter a number")
-                                return True
-            provider = providers.get_provider(selected_provider)
 
         # Generate translations either from preset or provider
         if selected_preset is not None:

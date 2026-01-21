@@ -15,7 +15,7 @@ from utils import (
     build_refinement_template,
     parse_refinement_template,
 )
-from workflows.release import select_platform_versions
+from workflows.helpers import pick_provider, select_platform_versions
 
 
 def _prompt_source_promotional_text(ui, base_text: str, default_refine: str, refine_phrase: str) -> (str, str):
@@ -168,72 +168,14 @@ def run(cli) -> bool:
     seed = getattr(cli, "session_seed", None)
     limit = get_field_limit("promotional_text") or 170
     translations: Dict[str, str] = {}
-    provs = providers.list_providers()
-    default_provider = (
-        getattr(cli, "config", None).get_default_ai_provider()
-        if getattr(cli, "config", None)
-        else None
-    )
     selected_provider: Optional[str] = None
     provider = None
 
     while True:
         if provider is None and target_locales:
-            if not provs:
-                print_error("No AI providers configured. Please run setup.")
+            provider, selected_provider = pick_provider(cli)
+            if not provider:
                 return True
-            if len(provs) == 1:
-                selected_provider = provs[0]
-                print_info(f"Using AI provider: {selected_provider}")
-            else:
-                if default_provider and default_provider in provs:
-                    use_default = ui.confirm(
-                        f"Use default AI provider: {default_provider}?", True
-                    )
-                    if use_default is None:
-                        raw = input(
-                            f"Use default provider '{default_provider}'? (Y/n): "
-                        ).strip().lower()
-                        use_default = raw in ("", "y", "yes")
-                    if use_default:
-                        selected_provider = default_provider
-                if not selected_provider:
-                    if ui.available():
-                        choices = [
-                            {
-                                "name": p + ("  (default)" if p == default_provider else ""),
-                                "value": p,
-                            }
-                            for p in provs
-                        ]
-                        selected_provider = ui.select(
-                            "Select AI provider", choices, add_back=True
-                        )
-                    if not selected_provider:
-                        print("Available AI providers:")
-                        for i, p in enumerate(provs, 1):
-                            star = " *" if p == default_provider else ""
-                            print(f"{i}. {p}{star}")
-                        raw = input(
-                            "Select provider (number) or 'b' to go back (Enter = default): "
-                        ).strip().lower()
-                        if raw == "b":
-                            print_info("Cancelled")
-                            return True
-                        if not raw and default_provider and default_provider in provs:
-                            selected_provider = default_provider
-                        else:
-                            try:
-                                idx = int(raw)
-                                if 1 <= idx <= len(provs):
-                                    selected_provider = provs[idx - 1]
-                                else:
-                                    print_error("Invalid choice")
-                                    return True
-                            except ValueError:
-                                print_error("Please enter a number")
-                                return True
-            provider = providers.get_provider(selected_provider)
 
         if target_locales:
             show_provider_and_source(

@@ -21,6 +21,7 @@ from utils import (
     provider_model_info,
     format_progress,
 )
+from workflows.helpers import pick_provider, choose_target_locales, get_app_locales
 
 _DEBUG_APP_EVENTS = os.environ.get("TRANSLATER_DEBUG_APP_EVENTS", "").strip().lower() in ("1", "true", "yes", "y", "on")
 
@@ -221,14 +222,7 @@ def run(cli) -> bool:
         return True
 
     # Prefill locales from app's latest version (helps default-check common targets)
-    app_locales = set()
-    try:
-        latest_ver = asc.get_latest_app_store_version(app_id)
-        if latest_ver:
-            locs = asc.get_app_store_version_localizations(latest_ver).get("data", [])
-            app_locales = {l.get("attributes", {}).get("locale") for l in locs if l.get("attributes", {}).get("locale")}
-    except Exception:
-        pass
+    app_locales = get_app_locales(asc, app_id)
 
     selected_events = _select_app_events(ui, asc, app_id)
     if not selected_events:
@@ -237,9 +231,7 @@ def run(cli) -> bool:
     if _DEBUG_APP_EVENTS:
         _debug("TRANSLATER_DEBUG_APP_EVENTS enabled")
 
-    from workflows.iap_translate import _pick_provider, _choose_targets  # reuse shared helpers
-
-    provider, provider_key = _pick_provider(cli)
+    provider, provider_key = pick_provider(cli)
     if not provider:
         return True
 
@@ -328,11 +320,13 @@ def run(cli) -> bool:
             print_error("Source fields (name/short/long) are required to create new localizations; skipping this event.")
             continue
 
-        target_locales = _choose_targets(
+        available_targets = {k: v for k, v in APP_STORE_LOCALES.items() if k not in existing_locale_ids and k != base_locale}
+        target_locales = choose_target_locales(
             ui,
-            list(existing_locale_ids.keys()),
+            available_targets,
             base_locale,
             preferred_locales=app_locales,
+            prompt="Select target languages",
         )
         target_locales = [t for t in target_locales if t != base_locale]
         if not target_locales:
