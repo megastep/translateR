@@ -140,6 +140,7 @@ def _filename_from_url(url: str) -> str:
         if name and "." in name:
             return name
     except Exception:
+        # Ignore URL parsing errors; fallback to default filename
         pass
     return "game_center_image.png"
 
@@ -187,6 +188,7 @@ def _fetch_image_resource(asc, kind: str, localization_id: str) -> Optional[Dict
         if data:
             return data
     except Exception:
+        # Ignore errors from direct image fetch; fallback via linkage will be tried below
         pass
 
     # Fallback to relationship linkage + image by id
@@ -216,6 +218,7 @@ def _fetch_image_resource(asc, kind: str, localization_id: str) -> Optional[Dict
                 resp = asc.get_game_center_challenge_image(img_id)
                 return (resp or {}).get("data")
     except Exception:
+        # Ignore errors fetching Game Center image via localization; will return None
         return None
     return None
 
@@ -289,6 +292,7 @@ def _download_origin_image(origin_image: Dict) -> Tuple[Optional[bytes], Optiona
                 if fallback not in urls_to_try:
                     urls_to_try.append(fallback)
             except Exception:
+                # Ignore errors building fallback URL; continue with next size candidate
                 pass
 
     last_err = None
@@ -391,6 +395,7 @@ def _select_items(ui, items: List[Dict], kind: str) -> List[Dict]:
                     if 1 <= n <= len(choices):
                         selected_ids.append(choices[n - 1]["value"])
             except Exception:
+                # Invalid input format; treat as no selection
                 selected_ids = []
 
     if not selected_ids:
@@ -438,6 +443,7 @@ def _select_base_locale(ui, available_locales: List[str], recommended: Optional[
         if 1 <= idx <= len(ordered):
             return ordered[idx - 1]
     except Exception:
+        # Invalid input; treat as no selection and return None
         pass
     return None
 
@@ -506,6 +512,7 @@ def run(cli) -> bool:
         group = group_resp.get("data") if isinstance(group_resp, dict) else None
         group_id = group.get("id") if isinstance(group, dict) else None
     except Exception:
+        # Ignore errors fetching Game Center group; group_id will be None
         group_id = None
 
     include_group = False
@@ -783,6 +790,7 @@ def run(cli) -> bool:
                 print(line, end="\r")
                 last_progress_len = len(line)
             except Exception:
+                # Ignore progress display errors (e.g., broken pipes, non-interactive output)
                 pass
 
             for loc, data in results.items():
@@ -799,6 +807,7 @@ def run(cli) -> bool:
                         print("\r" + line + (" " * pad), end="")
                         last_progress_len = len(line)
                     except Exception:
+                        # Ignore progress display errors so they don't interrupt the main workflow
                         pass
                     continue
 
@@ -833,6 +842,7 @@ def run(cli) -> bool:
                             else:
                                 raise
                         except Exception:
+                            # Ignore image errors; continue with text-only update
                             print_error(f"  ❌ Failed to save {language_name}: {e}")
                     else:
                         print_error(f"  ❌ Failed to save {language_name}: {e}")
@@ -853,6 +863,7 @@ def run(cli) -> bool:
                     print("\r" + line + (" " * pad), end="")
                     last_progress_len = len(line)
                 except Exception:
+                    # Ignore progress display errors so they don't interrupt the main workflow
                     pass
 
             if errs:
@@ -861,6 +872,7 @@ def run(cli) -> bool:
             try:
                 print("\r" + (" " * last_progress_len) + "\r", end="")
             except Exception:
+                # Ignore errors clearing progress line
                 pass
             total_translated += success_count
             print_success(f"Saved {success_count}/{len(missing_locales)} locales for {label}")
@@ -930,6 +942,7 @@ def run(cli) -> bool:
                 print(line, end="\r")
                 last_progress_len = len(line)
             except Exception:
+                # Ignore progress display errors (e.g., broken pipes, non-interactive output)
                 pass
 
             for loc, data in results.items():
@@ -947,6 +960,7 @@ def run(cli) -> bool:
                         print("\r" + line + (" " * pad), end="")
                         last_progress_len = len(line)
                     except Exception:
+                        # Ignore progress display errors so they don't interrupt the main workflow
                         pass
                     continue
 
@@ -985,6 +999,7 @@ def run(cli) -> bool:
                             else:
                                 raise
                         except Exception:
+                            # Ignore image errors; continue with text-only update
                             print_error(f"  ❌ Failed to save {language_name}: {e}")
                     else:
                         print_error(f"  ❌ Failed to save {language_name}: {e}")
@@ -1005,6 +1020,7 @@ def run(cli) -> bool:
                     print("\r" + line + (" " * pad), end="")
                     last_progress_len = len(line)
                 except Exception:
+                    # Ignore progress display errors so they don't interrupt the main workflow
                     pass
 
             if errs:
@@ -1013,6 +1029,7 @@ def run(cli) -> bool:
             try:
                 print("\r" + (" " * last_progress_len) + "\r", end="")
             except Exception:
+                # Ignore errors clearing progress line
                 pass
             total_translated += success_count
             print_success(f"Saved {success_count}/{len(missing_locales)} locales for {label}")
@@ -1069,6 +1086,7 @@ def run(cli) -> bool:
                 print(line, end="\r")
                 last_progress_len = len(line)
             except Exception:
+                # Ignore progress display errors (e.g., broken pipes, non-interactive output)
                 pass
 
             for loc, data in results.items():
@@ -1084,6 +1102,7 @@ def run(cli) -> bool:
                         print("\r" + line + (" " * pad), end="")
                         last_progress_len = len(line)
                     except Exception:
+                        # Ignore progress display errors so they don't interrupt the main workflow
                         pass
                     continue
 
@@ -1134,6 +1153,7 @@ def run(cli) -> bool:
                             else:
                                 raise
                         except Exception:
+                            # Ignore image errors; continue with text-only update
                             print_error(f"  ❌ Failed to save {language_name}: {e}")
                     else:
                         print_error(f"  ❌ Failed to save {language_name}: {e}")
@@ -1154,6 +1174,7 @@ def run(cli) -> bool:
                     print("\r" + line + (" " * pad), end="")
                     last_progress_len = len(line)
                 except Exception:
+                    # Ignore progress display errors so they don't interrupt the main workflow
                     pass
 
             if errs:
@@ -1162,6 +1183,7 @@ def run(cli) -> bool:
             try:
                 print("\r" + (" " * last_progress_len) + "\r", end="")
             except Exception:
+                # Ignore errors clearing progress line
                 pass
             total_translated += success_count
             print_success(f"Saved {success_count}/{len(missing_locales)} locales for {label}")
