@@ -218,7 +218,7 @@ def _fetch_image_resource(asc, kind: str, localization_id: str) -> Optional[Dict
                 resp = asc.get_game_center_challenge_image(img_id)
                 return (resp or {}).get("data")
     except Exception:
-        # Ignore errors fetching challenge image via localization; will return None
+        # Ignore errors fetching Game Center image via localization; will return None
         return None
     return None
 
@@ -292,7 +292,7 @@ def _download_origin_image(origin_image: Dict) -> Tuple[Optional[bytes], Optiona
                 if fallback not in urls_to_try:
                     urls_to_try.append(fallback)
             except Exception:
-                # Ignore errors building fallback URL from template; move to next template
+                # Ignore errors building fallback URL; continue with next size candidate
                 pass
 
     last_err = None
