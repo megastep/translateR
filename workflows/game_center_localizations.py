@@ -960,7 +960,7 @@ def run(cli) -> bool:
                         print("\r" + line + (" " * pad), end="")
                         last_progress_len = len(line)
                     except Exception:
-                    # Ignore progress display errors so they don't interrupt the main workflow
+                        # Ignore progress display errors so they don't interrupt the main workflow
                         pass
                     continue
 
@@ -1102,7 +1102,7 @@ def run(cli) -> bool:
                         print("\r" + line + (" " * pad), end="")
                         last_progress_len = len(line)
                     except Exception:
-                    # Ignore progress display errors so they don't interrupt the main workflow
+                        # Ignore progress display errors so they don't interrupt the main workflow
                         pass
                     continue
 
