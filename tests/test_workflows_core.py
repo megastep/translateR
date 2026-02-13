@@ -250,3 +250,68 @@ def test_release_run_custom_source_when_no_preset(fake_cli, fake_asc, fake_ui, l
 
     assert release.run(fake_cli) is True
     assert fake_cli.ai_manager.get_provider("fake").calls[-1]["text"] == "Custom release notes"
+
+
+def test_release_run_non_tui_apply_path(fake_cli, fake_asc, localization_payload, monkeypatch):
+    class NonTUI:
+        def available(self):
+            return False
+
+        def prompt_app_id(self, _asc):
+            return "app1"
+
+        def confirm(self, *_args, **_kwargs):
+            return None
+
+        def prompt_multiline(self, *_args, **_kwargs):
+            return "not-used"
+
+    fake_cli.ui = NonTUI()
+    locs = {
+        "data": [
+            localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+            localization_payload("fr-FR", loc_id="loc-fr", whatsNew=""),
+        ]
+    }
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response("get_app_store_version_localizations", lambda *_a, **_k: locs)
+    fake_asc.set_response("update_app_store_version_localization", {"data": {"id": "ok"}})
+    fake_asc.set_response("get_app_store_version_localization", {"data": {"attributes": {"whatsNew": "translated-French-Base notes"}}})
+
+    answers = iter(["", "", "", "", "", ""])
+    monkeypatch.setattr(release, "list_presets", lambda: [])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
+
+    assert release.run(fake_cli) is True
+
+
+def test_promo_run_non_tui_apply_path(fake_cli, fake_asc, localization_payload, monkeypatch):
+    class NonTUI:
+        def available(self):
+            return False
+
+        def prompt_app_id(self, _asc):
+            return "app1"
+
+        def confirm(self, *_args, **_kwargs):
+            return None
+
+        def prompt_multiline(self, *_args, **_kwargs):
+            return "not-used"
+
+    fake_cli.ui = NonTUI()
+    locs = {
+        "data": [
+            localization_payload("en-US", loc_id="loc-en", promotionalText="Base promo"),
+            localization_payload("fr-FR", loc_id="loc-fr", promotionalText=""),
+        ]
+    }
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response("get_app_store_version_localizations", lambda *_a, **_k: locs)
+    fake_asc.set_response("update_app_store_version_localization", {"data": {"id": "ok"}})
+    fake_asc.set_response("get_app_store_version_localization", {"data": {"attributes": {"promotionalText": "translated-French-Base promo"}}})
+
+    answers = iter(["", "", "", "", "", ""])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
+
+    assert promo.run(fake_cli) is True
