@@ -115,3 +115,53 @@ def test_run_exits_when_setup_fails(monkeypatch):
     cli.setup_app_store_client = lambda: False
 
     assert main.TranslateRCLI.run(cli) is None
+
+
+def test_translate_app_info_updates_and_creates_localizations(monkeypatch):
+    cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
+    cli.session_seed = 7
+
+    class ASC:
+        def __init__(self):
+            self.updated = []
+            self.created = []
+
+        def find_primary_app_info_id(self, _app_id):
+            return "app-info-1"
+
+        def get_app_info_localizations(self, _app_info_id):
+            return {
+                "data": [
+                    {"id": "loc-en", "attributes": {"locale": "en-US"}},
+                    {"id": "loc-fr", "attributes": {"locale": "fr-FR"}},
+                ]
+            }
+
+        def get_app_info_localization(self, _loc_id):
+            return {"data": {"attributes": {"name": "Base App", "subtitle": "Base Subtitle"}}}
+
+        def update_app_info_localization(self, loc_id, **kwargs):
+            self.updated.append((loc_id, kwargs))
+
+        def create_app_info_localization(self, app_info_id, locale, **kwargs):
+            self.created.append((app_info_id, locale, kwargs))
+
+    class Provider:
+        def translate(self, text, target_language, max_length=None, seed=None):
+            return f"{target_language}-{text}"[:max_length]
+
+    asc = ASC()
+    cli.asc_client = asc
+    monkeypatch.setattr(main.time, "sleep", lambda *_a, **_k: None)
+
+    main.TranslateRCLI._translate_app_info(cli, "app1", ["fr-FR", "de-DE"], Provider())
+
+    assert asc.updated and asc.updated[0][0] == "loc-fr"
+    assert asc.created and asc.created[0][1] == "de-DE"
+
+
+def test_translate_app_info_skips_when_no_app_info_id():
+    cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
+    cli.asc_client = types.SimpleNamespace(find_primary_app_info_id=lambda _app_id: None)
+
+    assert main.TranslateRCLI._translate_app_info(cli, "app1", ["fr-FR"], object()) is None
