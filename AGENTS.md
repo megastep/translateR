@@ -28,6 +28,15 @@
 - Run locally: `python3 main.py` (first run creates `config/` and prompts for keys)
 - Optional tests: `pytest -q` (if `pytest` and `tests/` are added)
 
+## App Store Connect API Skill
+
+- In-repo skill path: `skills/app-store-connect-api/`
+- OpenAPI artifact: `skills/app-store-connect-api/references/openapi.oas.json`
+- Query summary: `python skills/app-store-connect-api/scripts/query_spec.py summary`
+- Search operations: `python skills/app-store-connect-api/scripts/query_spec.py search "subscriptions" --limit 20`
+- Inspect one endpoint: `python skills/app-store-connect-api/scripts/query_spec.py show GET /v1/apps`
+- Rebuild operation index: `python skills/app-store-connect-api/scripts/build_operation_index.py`
+
 ## Coding Style & Naming Conventions
 
 - Python 3, 4‑space indentation; prefer type hints (`typing`) and docstrings.
