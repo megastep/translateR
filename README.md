@@ -249,14 +249,14 @@ After first run, config files are created in `config/`:
 
 ## Developer Skill: App Store Connect API
 
-For endpoint discovery and API contract checks, use the in-repo skill at `skills/app-store-connect-api/`.
+For endpoint discovery and API contract checks, use the in-repo skill at `.codex/skills/app-store-connect-api/`.
 
-- OpenAPI artifact: `skills/app-store-connect-api/references/openapi.oas.json`
-- Operation index (generated): `skills/app-store-connect-api/references/operation-index.json`
-- Query script: `python skills/app-store-connect-api/scripts/query_spec.py summary`
-- Search operations: `python skills/app-store-connect-api/scripts/query_spec.py search "subscriptions" --limit 20`
-- Inspect one operation: `python skills/app-store-connect-api/scripts/query_spec.py show GET /v1/apps`
-- Rebuild compact index: `python skills/app-store-connect-api/scripts/build_operation_index.py`
+- OpenAPI artifact: `.codex/skills/app-store-connect-api/references/openapi.oas.json`
+- Operation index (generated): `.codex/skills/app-store-connect-api/references/operation-index.json`
+- Query script: `python .codex/skills/app-store-connect-api/scripts/query_spec.py summary`
+- Search operations: `python .codex/skills/app-store-connect-api/scripts/query_spec.py search "subscriptions" --limit 20`
+- Inspect one operation: `python .codex/skills/app-store-connect-api/scripts/query_spec.py show GET /v1/apps`
+- Rebuild compact index: `python .codex/skills/app-store-connect-api/scripts/build_operation_index.py`
 
 ## Logging & Debugging
 

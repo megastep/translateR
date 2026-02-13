@@ -11,19 +11,19 @@ Use this skill to work against the local App Store Connect OpenAPI definition in
 
 1. Start with a fast API overview.
 Run:
-`python skills/app-store-connect-api/scripts/query_spec.py summary`
+`python .codex/skills/app-store-connect-api/scripts/query_spec.py summary`
 
 2. Find candidate operations by feature keyword.
 Run:
-`python skills/app-store-connect-api/scripts/query_spec.py search "subscriptions" --limit 20`
+`python .codex/skills/app-store-connect-api/scripts/query_spec.py search "subscriptions" --limit 20`
 
 3. Inspect one operation in detail before coding.
 Run:
-`python skills/app-store-connect-api/scripts/query_spec.py show GET /v1/apps`
+`python .codex/skills/app-store-connect-api/scripts/query_spec.py show GET /v1/apps`
 
 4. Generate a compact operation index when repeated lookups are needed.
 Run:
-`python skills/app-store-connect-api/scripts/build_operation_index.py`
+`python .codex/skills/app-store-connect-api/scripts/build_operation_index.py`
 
 ## Rules
 
@@ -33,7 +33,7 @@ Run:
 
 ## Resources
 
-- OpenAPI source: `skills/app-store-connect-api/references/openapi.oas.json`
-- Query helper: `skills/app-store-connect-api/scripts/query_spec.py`
-- Index builder: `skills/app-store-connect-api/scripts/build_operation_index.py`
-- Generated index (optional): `skills/app-store-connect-api/references/operation-index.json`
+- OpenAPI source: `.codex/skills/app-store-connect-api/references/openapi.oas.json`
+- Query helper: `.codex/skills/app-store-connect-api/scripts/query_spec.py`
+- Index builder: `.codex/skills/app-store-connect-api/scripts/build_operation_index.py`
+- Generated index (optional): `.codex/skills/app-store-connect-api/references/operation-index.json`
