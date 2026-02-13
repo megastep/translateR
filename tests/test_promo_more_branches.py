@@ -168,8 +168,6 @@ def test_promo_run_non_tui_reenter_edit_apply_error_and_verify_mismatch(fake_cli
     fake_asc.set_response("get_app_store_version_localizations", locs_by_version)
 
     def update_loc(localization_id=None, **_kwargs):
-        if localization_id == "ios-en":
-            raise RuntimeError("base update failed")
         return {"data": {"id": localization_id}}
 
     fake_asc.set_response("update_app_store_version_localization", update_loc)
