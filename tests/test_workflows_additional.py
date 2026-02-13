@@ -247,3 +247,87 @@ def test_app_events_run_creates_localization(fake_cli, fake_asc, fake_ui, monkey
 
     assert app_events_translate.run(fake_cli) is True
     assert any(call[0] == "create_app_event_localization" for call in fake_asc.calls)
+
+
+def test_subscription_run_group_scope_creates_localization(fake_cli, fake_asc, fake_ui, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.select_values.append("group")
+    fake_ui.checkbox_values.append(["group1"])
+
+    monkeypatch.setattr(subscription_translate, "choose_target_locales", lambda *_a, **_k: ["fr-FR"])
+
+    fake_asc.set_response("get_latest_app_store_version", "ver-ios")
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {"data": [{"id": "loc-en", "attributes": {"locale": "en-US"}}]},
+    )
+    fake_asc.set_response(
+        "get_subscription_groups",
+        {"data": [{"id": "group1", "attributes": {"referenceName": "Main Group"}}]},
+    )
+    fake_asc.set_response(
+        "get_subscription_group_localizations",
+        {
+            "data": [
+                {
+                    "id": "grouploc-en",
+                    "attributes": {"locale": "en-US", "name": "Main Name", "customAppName": "Custom Name"},
+                }
+            ]
+        },
+    )
+    fake_asc.set_response("create_subscription_group_localization", {"data": {"id": "grouploc-fr"}})
+
+    monkeypatch.setattr(subscription_translate.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert subscription_translate.run(fake_cli) is True
+    assert any(call[0] == "create_subscription_group_localization" for call in fake_asc.calls)
+
+
+def test_app_events_run_falls_back_to_included_localizations(fake_cli, fake_asc, fake_ui, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.checkbox_values.extend([["event1"], ["fr-FR"]])
+    monkeypatch.setattr(app_events_translate, "choose_target_locales", lambda *_a, **_k: ["fr-FR"])
+
+    fake_asc.set_response("get_latest_app_store_version", "ver-ios")
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {"data": [{"id": "loc-en", "attributes": {"locale": "en-US"}}]},
+    )
+    fake_asc.set_response(
+        "get_app_events",
+        {
+            "data": [
+                {
+                    "id": "event1",
+                    "attributes": {"referenceName": "Season Event", "eventState": "ACTIVE", "primaryLocale": "en-US"},
+                }
+            ]
+        },
+    )
+    fake_asc.set_response("get_app_event_localizations", {"data": []})
+    fake_asc.set_response(
+        "get_app_event",
+        {
+            "included": [
+                {
+                    "type": "appEventLocalizations",
+                    "id": "evloc-en",
+                    "attributes": {
+                        "locale": "en-US",
+                        "name": "Event Name",
+                        "shortDescription": "Short text",
+                        "longDescription": "Long event description",
+                    },
+                }
+            ]
+        },
+    )
+    fake_asc.set_response("create_app_event_localization", {"data": {"id": "evloc-fr"}})
+
+    monkeypatch.setattr(app_events_translate.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert app_events_translate.run(fake_cli) is True
+    assert any(call[0] == "create_app_event_localization" for call in fake_asc.calls)
