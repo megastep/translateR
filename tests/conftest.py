@@ -190,6 +190,11 @@ class FakeASC:
     def create_app_info_localization(self, *args, **kwargs):
         return self._record("create_app_info_localization", *args, **kwargs)
 
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return lambda *args, **kwargs: self._record(name, *args, **kwargs)
+
 
 @pytest.fixture
 def fake_provider():

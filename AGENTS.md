@@ -93,6 +93,8 @@
 - Framework: `pytest` recommended. Create `tests/test_*.py` covering workflows (translation, update, export) with mocked network.
 - Avoid real API calls; stub `AppStoreConnectClient` and provider classes.
 - Aim for coverage of limits (name/keywords length) and error paths.
+- Add or update tests for every new or changed behavior in production code; do not ship code changes without corresponding test coverage.
+- Before creating a commit, run the relevant test suite locally (at minimum `pytest -q`) and ensure it passes.
 
 ## Commit & Pull Request Guidelines
 
