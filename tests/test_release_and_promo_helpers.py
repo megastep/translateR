@@ -142,3 +142,35 @@ def test_prompt_source_promotional_text_custom_multiline():
     text, refine = promo._prompt_source_promotional_text(ui, "Base text", "default", "")
     assert text == "New promo"
     assert "keep concise" in refine
+
+
+def test_prompt_source_promotional_text_tui_cancel():
+    ui = DummyUI()
+    ui.select_values = [None]
+    text, refine = promo._prompt_source_promotional_text(ui, "Base text", "default", "r")
+    assert text == ""
+    assert refine == "r"
+
+
+def test_prompt_source_promotional_text_non_tui_defaults_to_use(monkeypatch):
+    class NonTUI:
+        def available(self):
+            return False
+
+        def prompt_multiline(self, *_args, **_kwargs):
+            return None
+
+    ui = NonTUI()
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "weird")
+    text, refine = promo._prompt_source_promotional_text(ui, "Base text", "default", "")
+    assert text == "Base text"
+    assert refine == "default"
+
+
+def test_prompt_source_promotional_text_retries_until_non_empty():
+    ui = DummyUI()
+    ui.select_values = ["custom", "custom", "custom"]
+    ui.multiline_values = ["", "  ", "Valid promo"]
+    text, refine = promo._prompt_source_promotional_text(ui, "Base text", "default", "")
+    assert text == "Valid promo"
+    assert refine == "default"
