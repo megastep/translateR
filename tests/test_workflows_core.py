@@ -315,3 +315,65 @@ def test_promo_run_non_tui_apply_path(fake_cli, fake_asc, localization_payload, 
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
 
     assert promo.run(fake_cli) is True
+
+
+def test_release_run_returns_when_base_language_not_detected(fake_cli, fake_asc, fake_ui, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.checkbox_values.extend([["IOS"]])
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        lambda *_a, **_k: {"data": [{"id": "loc-1", "attributes": {"locale": None, "whatsNew": ""}}]},
+    )
+    monkeypatch.setattr(release, "list_presets", lambda: [])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+    assert release.run(fake_cli) is True
+
+
+def test_release_run_returns_when_all_locales_already_have_notes(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.checkbox_values.extend([["IOS"]])
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        lambda *_a, **_k: {
+            "data": [
+                localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+                localization_payload("fr-FR", loc_id="loc-fr", whatsNew="Already translated"),
+            ]
+        },
+    )
+    monkeypatch.setattr(release, "list_presets", lambda: [])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+    assert release.run(fake_cli) is True
+
+
+def test_release_run_non_tui_back_from_locale_selection(fake_cli, fake_asc, localization_payload, monkeypatch):
+    class NonTUI:
+        def available(self):
+            return False
+
+        def prompt_app_id(self, _asc):
+            return "app1"
+
+        def confirm(self, *_args, **_kwargs):
+            return None
+
+        def prompt_multiline(self, *_args, **_kwargs):
+            return "unused"
+
+    fake_cli.ui = NonTUI()
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        lambda *_a, **_k: {
+            "data": [
+                localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+                localization_payload("fr-FR", loc_id="loc-fr", whatsNew=""),
+            ]
+        },
+    )
+    monkeypatch.setattr(release, "list_presets", lambda: [])
+    answers = iter(["", "", "b"])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
+    assert release.run(fake_cli) is True
