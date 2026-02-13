@@ -112,3 +112,36 @@ def test_select_platform_versions_handles_empty_versions():
 def test_get_app_locales_returns_empty_on_exception():
     asc = types.SimpleNamespace(get_latest_app_store_version=lambda _a: (_ for _ in ()).throw(RuntimeError("boom")))
     assert helpers.get_app_locales(asc, "app1") == set()
+
+
+def test_pick_provider_non_tui_numeric_input(monkeypatch):
+    p1 = object()
+    p2 = object()
+    ui = TinyUI(tui=False)
+    cli = types.SimpleNamespace(
+        ui=ui,
+        ai_manager=TinyManager({"openai": p1, "anthropic": p2}),
+        config=TinyConfig(default=""),
+    )
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "2")
+
+    provider, key = helpers.pick_provider(cli, allow_cancel=True)
+    assert provider is p2
+    assert key == "anthropic"
+
+
+def test_select_platform_versions_non_tui_all(monkeypatch):
+    ui = TinyUI(tui=False)
+    asc = types.SimpleNamespace(
+        _request=lambda *_a, **_k: {
+            "data": [
+                {"id": "v1", "attributes": {"platform": "IOS", "versionString": "1.0", "appStoreState": "READY"}},
+                {"id": "v2", "attributes": {"platform": "MAC_OS", "versionString": "1.0", "appStoreState": "READY"}},
+            ]
+        }
+    )
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    selected, latest, labels = helpers.select_platform_versions(ui, asc, "app1")
+    assert set(selected.keys()) == {"IOS", "MAC_OS"}
+    assert labels["IOS"] == "iOS"
