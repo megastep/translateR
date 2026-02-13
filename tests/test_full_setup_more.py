@@ -64,3 +64,20 @@ def test_full_setup_empty_translation_warning_path(fake_cli, fake_ui, fake_asc, 
 
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
     assert full_setup.run(fake_cli) is True
+
+
+def test_full_setup_all_supported_languages_already_localized(fake_cli, fake_ui, fake_asc, monkeypatch):
+    fake_ui.app_id = "app1"
+    monkeypatch.setattr(full_setup, "select_platform_versions", lambda *_a, **_k: ({"IOS": {"id": "ver1"}}, None, None))
+    monkeypatch.setattr(full_setup, "detect_base_language", lambda _locs: "en-US")
+    monkeypatch.setattr(full_setup, "APP_STORE_LOCALES", {"en-US": "English", "fr-FR": "French"})
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {
+            "data": [
+                {"id": "loc-en", "attributes": {"locale": "en-US", "description": "Desc", "keywords": "a,b", "promotionalText": "Promo", "whatsNew": "Notes"}},
+                {"id": "loc-fr", "attributes": {"locale": "fr-FR", "description": "FR", "keywords": "c,d", "promotionalText": "Promo FR", "whatsNew": "Notes FR"}},
+            ]
+        },
+    )
+    assert full_setup.run(fake_cli) is True
