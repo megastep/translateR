@@ -1,0 +1,4 @@
+interface:
+  display_name: "App Store Connect API"
+  short_description: "Use and query the App Store Connect OpenAPI spec."
+  default_prompt: "Use this skill to inspect and reason about App Store Connect API endpoints, payloads, and constraints using the bundled OpenAPI artifact and helper scripts."

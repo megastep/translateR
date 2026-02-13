@@ -10,12 +10,18 @@ from utils import (
     print_info,
     print_success,
     print_warning,
-    parallel_map_locales,
     show_provider_and_source,
     build_refinement_template,
     parse_refinement_template,
 )
 from workflows.helpers import pick_provider, select_platform_versions
+from workflows.promo_helpers import (
+    apply_promotional_updates,
+    edit_promotional_translations,
+    generate_promotional_translations,
+    preview_promotional_translations,
+    verify_promotional_updates,
+)
 
 
 def _prompt_source_promotional_text(ui, base_text: str, default_refine: str, refine_phrase: str) -> (str, str):
@@ -186,43 +192,19 @@ def run(cli) -> bool:
                 title="Source promotional text",
                 seed=seed,
             )
-
-            def _task(loc: str) -> str:
-                language = APP_STORE_LOCALES.get(loc, loc)
-                txt = provider.translate(
-                    text=source_text,
-                    target_language=language,
-                    max_length=limit,
-                    is_keywords=False,
-                    seed=seed,
-                    refinement=refine_phrase,
-                )
-                txt = (txt or "").strip()
-                if len(txt) > limit:
-                    txt = txt[:limit]
-                return txt
-
-            translations, _errs = parallel_map_locales(
-                target_locales,
-                _task,
-                progress_action="Translated",
-                pacing_seconds=1.0,
+            translations = generate_promotional_translations(
+                provider=provider,
+                target_locales=target_locales,
+                source_text=source_text,
+                limit=limit,
+                seed=seed,
+                refine_phrase=refine_phrase,
             )
         else:
             translations = {}
 
         if target_locales:
-            print_info("Preview generated promotional text:")
-            for loc in target_locales:
-                language = APP_STORE_LOCALES.get(loc, loc)
-                print("-" * 60)
-                print(f"{language} [{loc}]")
-                print("-" * 60)
-                txt = translations.get(loc, "")
-                print(txt)
-                if not (txt or "").strip():
-                    print_warning(f"Empty translation for {language} [{loc}]")
-                print()
+            preview_promotional_translations(target_locales, translations)
 
         do_edit = False
         if ui.available():
@@ -257,8 +239,6 @@ def run(cli) -> bool:
                 continue
             if choice == "edit":
                 do_edit = True
-            elif choice == "apply":
-                pass
         else:
             raw = input("Apply (a), edit (e), re-enter source (r), or cancel (c)? ").strip().lower()
             if raw in ("c", "cancel"):
@@ -281,38 +261,7 @@ def run(cli) -> bool:
             do_edit = raw == "e"
 
         if do_edit and target_locales:
-            if ui.available():
-                choices = [
-                    {"name": f"{APP_STORE_LOCALES.get(loc, loc)} [{loc}]", "value": loc}
-                    for loc in target_locales
-                ]
-                to_edit = ui.checkbox("Select locales to edit", choices, add_back=True)
-                if to_edit:
-                    for loc in to_edit:
-                        language = APP_STORE_LOCALES.get(loc, loc)
-                        edited = ui.prompt_multiline(
-                            f"Edit promotional text for {language} (END with 'EOF'):",
-                            initial=translations.get(loc, ""),
-                        )
-                        if edited is not None:
-                            edited = edited.strip()
-                            if len(edited) > limit:
-                                edited = edited[:limit]
-                            translations[loc] = edited
-            else:
-                raw = input("Enter locales to edit (comma-separated) or Enter to skip: ").strip()
-                if raw:
-                    for loc in [s.strip() for s in raw.split(",") if s.strip() in target_locales]:
-                        language = APP_STORE_LOCALES.get(loc, loc)
-                        edited = ui.prompt_multiline(
-                            f"Edit promotional text for {language} (END with 'EOF'):",
-                            initial=translations.get(loc, ""),
-                        )
-                        if edited is not None:
-                            edited = edited.strip()
-                            if len(edited) > limit:
-                                edited = edited[:limit]
-                            translations[loc] = edited
+            edit_promotional_translations(ui, target_locales, translations, limit)
 
         break
 
@@ -326,78 +275,27 @@ def run(cli) -> bool:
 
     print()
     base_text = source_text[:limit]
-    for plat, locale_map in per_version_locales.items():
-        if plat not in selected_versions:
-            continue
-        plat_name = plat_label.get(plat, plat)
-        apply_locales = [loc for loc in target_locales if loc in locale_map]
-        total_to_update = len(apply_locales) + (1 if base_locale in locale_map else 0)
-        if total_to_update == 0:
-            continue
-        print_info(
-            f"Applying to {plat_name} ({total_to_update} locale{'s' if total_to_update != 1 else ''})..."
-        )
-
-        success = 0
-        if base_locale in locale_map:
-            try:
-                asc.update_app_store_version_localization(
-                    localization_id=locale_map[base_locale]["id"],
-                    promotional_text=base_text,
-                )
-                print_success(
-                    f"  Base locale {APP_STORE_LOCALES.get(base_locale, base_locale)} updated"
-                )
-                success += 1
-            except Exception as e:
-                print_warning(f"  Could not update base locale: {str(e)}")
-
-        if apply_locales:
-            def _apply(loc: str) -> bool:
-                asc.update_app_store_version_localization(
-                    localization_id=locale_map[loc]["id"],
-                    promotional_text=translations.get(loc, ""),
-                )
-                return True
-
-            updated, errors = parallel_map_locales(
-                apply_locales,
-                _apply,
-                progress_action=f"Updating {plat_name}",
-                pacing_seconds=0.0,
-            )
-            success += len(updated)
-            if errors:
-                print()
-        print_success(
-            f"{plat_name}: {success}/{total_to_update} locale{'s' if total_to_update != 1 else ''} updated"
-        )
+    apply_promotional_updates(
+        asc=asc,
+        per_version_locales=per_version_locales,
+        selected_versions=selected_versions,
+        plat_label=plat_label,
+        base_locale=base_locale,
+        base_text=base_text,
+        target_locales=target_locales,
+        translations=translations,
+    )
 
     try:
-        verify_failures = 0
-        expected_base = base_text.strip()
-        for plat, locale_map in per_version_locales.items():
-            if plat not in selected_versions:
-                continue
-            if base_locale in locale_map:
-                data = asc.get_app_store_version_localization(locale_map[base_locale]["id"]) or {}
-                promo = (
-                    data.get("data", {}).get("attributes", {}).get("promotionalText")
-                    or ""
-                ).strip()
-                if promo != expected_base:
-                    verify_failures += 1
-            for loc in target_locales:
-                if loc not in locale_map:
-                    continue
-                data = asc.get_app_store_version_localization(locale_map[loc]["id"]) or {}
-                promo = (
-                    data.get("data", {}).get("attributes", {}).get("promotionalText")
-                    or ""
-                ).strip()
-                expected = (translations.get(loc, "") or "").strip()
-                if promo != expected:
-                    verify_failures += 1
+        verify_failures = verify_promotional_updates(
+            asc=asc,
+            per_version_locales=per_version_locales,
+            selected_versions=selected_versions,
+            base_locale=base_locale,
+            base_text=base_text,
+            target_locales=target_locales,
+            translations=translations,
+        )
         if verify_failures:
             print_warning(
                 f"Promotional text may not have applied to {verify_failures} locale(s). Please verify in App Store Connect."
