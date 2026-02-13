@@ -1,6 +1,6 @@
 import builtins
 
-from workflows import app_info, copy, export_localizations, iap_translate, subscription_translate
+from workflows import app_events_translate, app_info, copy, export_localizations, iap_translate, subscription_translate
 
 
 def _versions_resp():
@@ -106,6 +106,46 @@ def test_select_iaps_returns_selected_items(fake_ui, fake_asc, monkeypatch):
     assert selected[0]["id"] == "iap1"
 
 
+def test_iap_run_creates_localization(fake_cli, fake_asc, fake_ui, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.checkbox_values.extend([["iap1"], ["fr-FR"]])
+
+    fake_asc.set_response("get_latest_app_store_version", "ver-ios")
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {"data": [{"id": "loc-en", "attributes": {"locale": "en-US"}}]},
+    )
+    fake_asc.set_response(
+        "get_in_app_purchases",
+        {
+            "data": [
+                {
+                    "id": "iap1",
+                    "attributes": {"referenceName": "Premium", "productId": "premium_monthly"},
+                }
+            ]
+        },
+    )
+    fake_asc.set_response(
+        "get_in_app_purchase_localizations",
+        {
+            "data": [
+                {
+                    "id": "iaploc-en",
+                    "attributes": {"locale": "en-US", "name": "Premium", "description": "Great value"},
+                }
+            ]
+        },
+    )
+    fake_asc.set_response("create_in_app_purchase_localization", {"data": {"id": "iaploc-fr"}})
+
+    monkeypatch.setattr(iap_translate.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert iap_translate.run(fake_cli) is True
+    assert any(call[0] == "create_in_app_purchase_localization" for call in fake_asc.calls)
+
+
 def test_subscription_pickers_select_groups_and_subs(fake_ui, fake_asc, monkeypatch):
     fake_ui._tui = False
     fake_asc.set_response(
@@ -124,3 +164,86 @@ def test_subscription_pickers_select_groups_and_subs(fake_ui, fake_asc, monkeypa
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "1")
     subs = subscription_translate._pick_subscriptions(fake_ui, fake_asc, groups)
     assert subs and subs[0]["id"] == "sub1"
+
+
+def test_subscription_run_creates_localization(fake_cli, fake_asc, fake_ui, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.select_values.append("sub")
+    fake_ui.checkbox_values.extend([["group1"], ["sub1"], ["fr-FR"]])
+
+    fake_asc.set_response("get_latest_app_store_version", "ver-ios")
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {"data": [{"id": "loc-en", "attributes": {"locale": "en-US"}}]},
+    )
+    fake_asc.set_response(
+        "get_subscription_groups",
+        {"data": [{"id": "group1", "attributes": {"referenceName": "Main Group"}}]},
+    )
+    fake_asc.set_response(
+        "get_subscriptions_for_group",
+        {"data": [{"id": "sub1", "attributes": {"name": "Monthly", "productId": "monthly"}}]},
+    )
+    fake_asc.set_response(
+        "get_subscription_localizations",
+        {
+            "data": [
+                {
+                    "id": "subloc-en",
+                    "attributes": {"locale": "en-US", "name": "Monthly", "description": "Best plan"},
+                }
+            ]
+        },
+    )
+    fake_asc.set_response("create_subscription_localization", {"data": {"id": "subloc-fr"}})
+
+    monkeypatch.setattr(subscription_translate.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert subscription_translate.run(fake_cli) is True
+    assert any(call[0] == "create_subscription_localization" for call in fake_asc.calls)
+
+
+def test_app_events_run_creates_localization(fake_cli, fake_asc, fake_ui, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.checkbox_values.extend([["event1"], ["fr-FR"]])
+
+    fake_asc.set_response("get_latest_app_store_version", "ver-ios")
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {"data": [{"id": "loc-en", "attributes": {"locale": "en-US"}}]},
+    )
+    fake_asc.set_response(
+        "get_app_events",
+        {
+            "data": [
+                {
+                    "id": "event1",
+                    "attributes": {"referenceName": "Season Event", "eventState": "ACTIVE", "primaryLocale": "en-US"},
+                }
+            ]
+        },
+    )
+    fake_asc.set_response(
+        "get_app_event_localizations",
+        {
+            "data": [
+                {
+                    "id": "evloc-en",
+                    "attributes": {
+                        "locale": "en-US",
+                        "name": "Event Name",
+                        "shortDescription": "Short text",
+                        "longDescription": "Long event description",
+                    },
+                }
+            ]
+        },
+    )
+    fake_asc.set_response("create_app_event_localization", {"data": {"id": "evloc-fr"}})
+
+    monkeypatch.setattr(app_events_translate.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert app_events_translate.run(fake_cli) is True
+    assert any(call[0] == "create_app_event_localization" for call in fake_asc.calls)
