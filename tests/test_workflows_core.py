@@ -547,3 +547,82 @@ def test_promo_run_returns_when_base_language_not_detected(fake_cli, fake_asc, f
     )
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
     assert promo.run(fake_cli) is True
+
+
+def test_release_run_preset_reenter_to_custom_source(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.select_values.extend(["reenter", "apply"])
+    fake_ui.checkbox_values.extend([["IOS"], ["fr-FR"]])
+    fake_ui.confirm_values.append(True)
+    fake_ui.multiline_values.append("Custom from reenter")
+
+    locs = {
+        "data": [
+            localization_payload("en-US", loc_id="loc-en", whatsNew=""),
+            localization_payload("fr-FR", loc_id="loc-fr", whatsNew=""),
+        ]
+    }
+    preset = ReleaseNotePreset(
+        preset_id="preset1",
+        name="Preset One",
+        translations={"en-US": "Base preset", "fr-FR": "Bonjour preset"},
+        path=None,
+        built_in=True,
+    )
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response("get_app_store_version_localizations", lambda *_a, **_k: locs)
+    fake_asc.set_response("update_app_store_version_localization", {"data": {"id": "ok"}})
+    fake_asc.set_response(
+        "get_app_store_version_localization",
+        {"data": {"attributes": {"whatsNew": "translated-French-Custom from reenter"}}},
+    )
+    monkeypatch.setattr(release, "list_presets", lambda: [preset])
+    picks = iter([(preset, False), (None, True)])
+    monkeypatch.setattr(release, "prompt_preset_selection", lambda *_a, **_k: next(picks))
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert release.run(fake_cli) is True
+    assert fake_cli.ai_manager.get_provider("fake").calls[-1]["text"] == "Custom from reenter"
+
+
+def test_release_run_preset_reenter_switches_to_other_preset(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.select_values.extend(["reenter", "apply"])
+    fake_ui.checkbox_values.extend([["IOS"], ["fr-FR"]])
+    fake_ui.confirm_values.append(True)
+
+    locs = {
+        "data": [
+            localization_payload("en-US", loc_id="loc-en", whatsNew=""),
+            localization_payload("fr-FR", loc_id="loc-fr", whatsNew=""),
+        ]
+    }
+    preset1 = ReleaseNotePreset(
+        preset_id="preset1",
+        name="Preset One",
+        translations={"en-US": "Base preset", "fr-FR": "Bonjour preset"},
+        path=None,
+        built_in=True,
+    )
+    preset2 = ReleaseNotePreset(
+        preset_id="preset2",
+        name="Preset Two",
+        translations={"en-US": "Second base", "fr-FR": "Deuxieme"},
+        path=None,
+        built_in=True,
+    )
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response("get_app_store_version_localizations", lambda *_a, **_k: locs)
+    fake_asc.set_response("update_app_store_version_localization", {"data": {"id": "ok"}})
+    fake_asc.set_response(
+        "get_app_store_version_localization",
+        {"data": {"attributes": {"whatsNew": "Deuxieme"}}},
+    )
+    monkeypatch.setattr(release, "list_presets", lambda: [preset1, preset2])
+    picks = iter([(preset1, False), (preset2, False)])
+    monkeypatch.setattr(release, "prompt_preset_selection", lambda *_a, **_k: next(picks))
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert release.run(fake_cli) is True
+    updates = [c for c in fake_asc.calls if c[0] == "update_app_store_version_localization"]
+    assert any(call[2].get("whats_new") == "Deuxieme" for call in updates)
