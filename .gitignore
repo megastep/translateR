@@ -4,6 +4,9 @@ config/api_keys.json
 
 # AI development files (keep local only)
 .claude/
+!.claude/
+.claude/*
+!.claude/napkin.md
 logs/
 
 # Export files (contain sensitive app data)
