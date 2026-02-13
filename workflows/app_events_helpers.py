@@ -25,6 +25,7 @@ def get_event_localizations_with_fallback(asc, event_id: str):
             if item.get("type") == "appEventLocalizations"
         ]
     except Exception:
+        # Best-effort fallback only; callers handle empty results.
         return []
 
 
@@ -65,15 +66,17 @@ def save_app_event_localizations(
             pad = max(0, last_progress_len - len(line))
             print("\r" + line + (" " * pad), end="")
             last_progress_len = len(line)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Progress updates are cosmetic and should not interrupt localization saves.
+            debug(f"progress render failed: {exc!r}")
 
     try:
         line = format_progress(0, total_targets, "Saving locales...")
         print(line, end="\r")
         last_progress_len = len(line)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Initial progress paint is also best-effort.
+        debug(f"initial progress render failed: {exc!r}")
 
     def _refresh_locale_ids() -> Dict[str, str]:
         try:
@@ -183,8 +186,9 @@ def save_app_event_localizations(
                                             )
                                             recovered = True
                                             break
-                                    except Exception:
-                                        pass
+                                    except Exception as fetch_err:
+                                        # Readback after 409 is best-effort; continue retry/backoff path.
+                                        debug(f"409 readback failed for locale={locale}: {fetch_err!r}")
                         time.sleep(0.4 * (attempt + 1))
                     except Exception:
                         time.sleep(0.4 * (attempt + 1))
@@ -201,7 +205,8 @@ def save_app_event_localizations(
 
     try:
         print("\r" + (" " * last_progress_len) + "\r", end="")
-    except Exception:
-        pass
+    except Exception as exc:
+        # Final terminal line clear is cosmetic.
+        debug(f"progress cleanup failed: {exc!r}")
 
     return saved

@@ -52,7 +52,11 @@ def resolve_output_in_references(raw_output: str) -> Path:
     else:
         resolved = (refs / candidate).resolve()
 
-    if not resolved.is_relative_to(refs):
+    # Backward-compatible "is within directory" check for Python < 3.9.
+    # Prefer relative_to in a try block instead of Path.is_relative_to().
+    try:
+        resolved.relative_to(refs)
+    except ValueError:
         raise ValueError(f"output must be inside {refs}, got: {resolved}")
 
     return resolved
