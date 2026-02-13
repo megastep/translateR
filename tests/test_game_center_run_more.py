@@ -226,3 +226,166 @@ def test_helpers_cover_selection_and_fetch_fallback_branches(monkeypatch):
     assert gcl._fetch_image_resource(asc, "achievement", "loc-a") == {"id": "img-a"}
     assert gcl._fetch_image_resource(asc, "leaderboard", "loc-l") == {"id": "img-l"}
     assert gcl._fetch_image_resource(asc, "challenge", "loc-c") == {"id": "img-c"}
+
+
+def test_run_group_fetch_exception_and_all_locales_already_present(fake_cli, fake_asc, fake_ui, monkeypatch):
+    _setup_achievement_run(monkeypatch, fake_ui, fake_asc)
+    fake_asc.set_response("get_game_center_group", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("group failed")))
+    monkeypatch.setattr(gcl, "APP_STORE_LOCALES", {"en-US": "English (US)"})
+    assert gcl.run(fake_cli) is True
+
+
+def test_run_include_group_non_tui_for_all_resource_types(fake_cli, fake_asc, fake_ui, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui._tui = False
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "y")
+    monkeypatch.setattr(
+        gcl,
+        "_choose_resource_types",
+        lambda _ui: ["achievement", "leaderboard", "activity", "challenge"],
+    )
+    monkeypatch.setattr(gcl, "_select_items", lambda _ui, _items, _kind: [])
+
+    fake_asc.set_response("get_game_center_detail", {"data": {"id": "detail1"}})
+    fake_asc.set_response("get_game_center_group", {"data": {"id": "group1"}})
+    fake_asc.set_response("get_game_center_achievements", {"data": [{"id": "ach1", "attributes": {}}]})
+    fake_asc.set_response("get_game_center_group_achievements", {"data": [{"id": "ach2", "attributes": {}}]})
+    fake_asc.set_response("get_game_center_leaderboards", {"data": [{"id": "lb1", "attributes": {}}]})
+    fake_asc.set_response("get_game_center_group_leaderboards", {"data": [{"id": "lb2", "attributes": {}}]})
+    fake_asc.set_response("get_game_center_activities", {"data": [{"id": "act1", "attributes": {}}]})
+    fake_asc.set_response("get_game_center_group_activities", {"data": [{"id": "act2", "attributes": {}}]})
+    fake_asc.set_response("get_game_center_challenges", {"data": [{"id": "ch1", "attributes": {}}]})
+    fake_asc.set_response("get_game_center_group_challenges", {"data": [{"id": "ch2", "attributes": {}}]})
+    assert gcl.run(fake_cli) is True
+
+
+def test_run_skips_item_without_id(fake_cli, fake_asc, fake_ui, monkeypatch):
+    _setup_achievement_run(monkeypatch, fake_ui, fake_asc)
+    monkeypatch.setattr(gcl, "_select_items", lambda _ui, _items, _kind: [{"attributes": {"referenceName": "No Id"}}])
+    assert gcl.run(fake_cli) is True
+
+
+def test_run_challenge_skips_when_versions_missing(fake_cli, fake_asc, fake_ui, monkeypatch):
+    _setup_common_context(monkeypatch, fake_ui, fake_asc, kind="challenge")
+    fake_asc.set_response(
+        "get_game_center_challenges",
+        {"data": [{"id": "ch1", "attributes": {"referenceName": "Challenge"}}]},
+    )
+    fake_asc.set_response("get_game_center_challenge_versions", {"data": []})
+    assert gcl.run(fake_cli) is True
+
+    _setup_common_context(monkeypatch, fake_ui, fake_asc, kind="challenge")
+    fake_asc.set_response(
+        "get_game_center_challenges",
+        {"data": [{"id": "ch1", "attributes": {"referenceName": "Challenge"}}]},
+    )
+    fake_asc.set_response("get_game_center_challenge_versions", {"data": [{"id": None, "attributes": {"version": "1.0"}}]})
+    assert gcl.run(fake_cli) is True
+
+
+def test_run_achievement_skips_when_base_or_required_fields_missing(fake_cli, fake_asc, fake_ui, monkeypatch):
+    _setup_achievement_run(monkeypatch, fake_ui, fake_asc)
+    fake_asc.set_response(
+        "get_game_center_achievement_localizations",
+        {
+            "data": [
+                {
+                    "id": "achloc-fr",
+                    "attributes": {
+                        "locale": "fr-FR",
+                        "name": "Nom",
+                        "beforeEarnedDescription": "Avant",
+                        "afterEarnedDescription": "Apres",
+                    },
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(gcl, "choose_target_locales", lambda *_a, **_k: ["de-DE"])
+    assert gcl.run(fake_cli) is True
+
+    _setup_achievement_run(monkeypatch, fake_ui, fake_asc)
+    fake_asc.set_response(
+        "get_game_center_achievement_localizations",
+        {
+            "data": [
+                {
+                    "id": "achloc-en",
+                    "attributes": {
+                        "locale": "en-US",
+                        "name": "Achievement",
+                        "beforeEarnedDescription": "",
+                        "afterEarnedDescription": "After",
+                    },
+                }
+            ]
+        },
+    )
+    assert gcl.run(fake_cli) is True
+
+
+def test_run_achievement_no_missing_locales_for_item(fake_cli, fake_asc, fake_ui, monkeypatch):
+    _setup_achievement_run(monkeypatch, fake_ui, fake_asc)
+    fake_asc.set_response(
+        "get_game_center_achievement_localizations",
+        {
+            "data": [
+                {
+                    "id": "achloc-en",
+                    "attributes": {
+                        "locale": "en-US",
+                        "name": "Achievement",
+                        "beforeEarnedDescription": "Before",
+                        "afterEarnedDescription": "After",
+                    },
+                },
+                {
+                    "id": "achloc-fr",
+                    "attributes": {
+                        "locale": "fr-FR",
+                        "name": "Succes",
+                        "beforeEarnedDescription": "Avant",
+                        "afterEarnedDescription": "Apres",
+                    },
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(gcl, "choose_target_locales", lambda *_a, **_k: ["fr-FR"])
+    assert gcl.run(fake_cli) is True
+
+
+def test_run_tui_include_group_and_download_failure_abort(fake_cli, fake_asc, fake_ui, monkeypatch):
+    _setup_achievement_run(monkeypatch, fake_ui, fake_asc)
+    fake_ui._tui = True
+    fake_ui.confirm_values.extend([True, False])
+    fake_asc.set_response("get_game_center_group", {"data": {"id": "group1"}})
+    fake_asc.set_response("get_game_center_group_achievements", {"data": [{"id": "ach2", "attributes": {"referenceName": "A2"}}]})
+    monkeypatch.setattr(gcl, "_fetch_image_resource", lambda *_a, **_k: {"attributes": {"imageAsset": {"templateUrl": "https://cdn/{w}"}}})
+    monkeypatch.setattr(gcl, "_download_origin_image", lambda *_a, **_k: (None, None, None, "download_failed", "boom"))
+    assert gcl.run(fake_cli) is True
+
+
+def test_run_base_locale_selection_cancel_after_disjoint_locale_sets(fake_cli, fake_asc, fake_ui, monkeypatch):
+    fake_ui.app_id = "app1"
+    monkeypatch.setattr(gcl, "_choose_resource_types", lambda _ui: ["achievement", "leaderboard"])
+    monkeypatch.setattr(gcl, "_select_items", lambda _ui, items, _kind: items)
+    monkeypatch.setattr(gcl, "_select_base_locale", lambda _ui, _locales, _recommended: None)
+    monkeypatch.setattr(gcl.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    fake_asc.set_response("get_game_center_detail", {"data": {"id": "detail1"}})
+    fake_asc.set_response("get_game_center_group", {"data": None})
+    fake_asc.set_response("get_latest_app_store_version", "ver-ios")
+    fake_asc.set_response("get_app_store_version_localizations", {"data": [{"id": "loc-en", "attributes": {"locale": "en-US"}}]})
+    fake_asc.set_response("get_game_center_achievements", {"data": [{"id": "ach1", "attributes": {"referenceName": "A"}}]})
+    fake_asc.set_response("get_game_center_leaderboards", {"data": [{"id": "lb1", "attributes": {"referenceName": "L"}}]})
+    fake_asc.set_response(
+        "get_game_center_achievement_localizations",
+        {"data": [{"id": "achloc-en", "attributes": {"locale": "en-US", "name": "A", "beforeEarnedDescription": "B", "afterEarnedDescription": "C"}}]},
+    )
+    fake_asc.set_response(
+        "get_game_center_leaderboard_localizations",
+        {"data": [{"id": "lbloc-fr", "attributes": {"locale": "fr-FR", "name": "L", "description": "D"}}]},
+    )
+    assert gcl.run(fake_cli) is True

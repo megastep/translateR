@@ -47,6 +47,14 @@ def test_filename_fallback_and_ext_none():
     assert gcl._filename_from_url("not-a-url") == "game_center_image.png"
     assert gcl._ext_from_content_type(None) is None
     assert gcl._ext_from_content_type("application/octet-stream") is None
+    assert gcl._ext_from_content_type("image/jpg") == "jpg"
+    assert gcl._ext_from_content_type("image/webp") == "webp"
+    assert gcl._ext_from_content_type("image/gif") == "gif"
+
+
+def test_filename_from_url_handles_parser_errors(monkeypatch):
+    monkeypatch.setattr(gcl, "urlparse", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert gcl._filename_from_url("https://cdn.example.com/a.png") == "game_center_image.png"
 
 
 def test_upload_operations_error_conditions():
@@ -98,3 +106,31 @@ def test_create_image_resource_requires_version_ids():
         gcl._create_image_resource(asc, "activity", "loc", None, "c.png", 1)
     with pytest.raises(Exception):
         gcl._create_image_resource(asc, "challenge", "loc", None, "d.png", 1)
+
+
+def test_select_items_no_items_and_numeric_selection(monkeypatch):
+    class UI:
+        def available(self):
+            return False
+
+    assert gcl._select_items(UI(), [], "achievement") == []
+
+    items = [
+        {"id": "i1", "attributes": {"referenceName": "One"}},
+        {"id": "i2", "attributes": {"referenceName": "Two"}},
+    ]
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "2")
+    selected = gcl._select_items(UI(), items, "achievement")
+    assert [it["id"] for it in selected] == ["i2"]
+
+
+def test_select_base_locale_empty_and_numeric_pick(monkeypatch):
+    class UI:
+        def available(self):
+            return False
+
+    assert gcl._select_base_locale(UI(), [], "en-US") is None
+
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "1")
+    picked = gcl._select_base_locale(UI(), ["fr-FR", "en-US"], None)
+    assert picked == "fr-FR"
