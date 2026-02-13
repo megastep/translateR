@@ -2,6 +2,8 @@
 
 from typing import Dict, List
 
+import requests
+
 from utils import (
     APP_STORE_LOCALES,
     parallel_map_locales,
@@ -134,7 +136,7 @@ def apply_promotional_updates(
                     f"  Base locale {APP_STORE_LOCALES.get(base_locale, base_locale)} updated"
                 )
                 success += 1
-            except Exception as exc:
+            except requests.exceptions.RequestException as exc:
                 print_warning(f"  Could not update base locale: {str(exc)}")
 
         if apply_locales:

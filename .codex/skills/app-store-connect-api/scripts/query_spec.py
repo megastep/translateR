@@ -4,31 +4,10 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, List
 
-
-def default_spec_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "references" / "openapi.oas.json"
-
-
-def load_spec(spec_path: Path) -> Dict:
-    with spec_path.open("r", encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def iter_operations(spec: Dict) -> Iterable[Tuple[str, str, Dict]]:
-    paths = spec.get("paths", {})
-    for path, path_item in paths.items():
-        if not isinstance(path_item, dict):
-            continue
-        for method, op in path_item.items():
-            if method.lower() not in {"get", "post", "put", "patch", "delete", "head", "options"}:
-                continue
-            if not isinstance(op, dict):
-                continue
-            yield method.upper(), path, op
+from spec_utils import default_spec_path, iter_operations, load_spec
 
 
 def cmd_summary(spec: Dict) -> int:
