@@ -105,3 +105,48 @@ def test_create_and_update_localization_payload_mapping(monkeypatch):
     patch_calls = [call for call in sent if call[0] == "PATCH"]
     assert patch_calls
     assert patch_calls[0][1] == "appStoreVersionLocalizations/loc-1"
+
+
+def test_many_wrapper_methods_hit_expected_endpoints(monkeypatch):
+    seen = []
+
+    def fake_request(self, method, endpoint, params=None, data=None, max_retries=3):
+        seen.append((method, endpoint, params, data))
+        return {"data": []}
+
+    monkeypatch.setattr(AppStoreConnectClient, "_request", fake_request)
+    client = AppStoreConnectClient("kid", "issuer", "pk")
+
+    client.get_app_infos("app1")
+    client.get_app_info_localizations("info1")
+    client.get_app_info_localization("loc1")
+    client.get_in_app_purchases("app1")
+    client.get_in_app_purchase_localizations("iap1")
+    client.get_subscription_groups("app1")
+    client.get_subscriptions_for_group("group1")
+    client.get_subscription_localizations("sub1")
+    client.get_subscription_group_localizations("group1")
+    client.get_app_events("app1")
+    client.get_app_event_localizations("event1")
+    client.get_game_center_detail("app1")
+    client.get_game_center_group("detail1")
+    client.get_game_center_achievements("detail1")
+    client.get_game_center_leaderboards("detail1")
+    client.get_game_center_activities("detail1")
+    client.get_game_center_challenges("detail1")
+    client.get_game_center_group_achievements("group1")
+    client.get_game_center_group_leaderboards("group1")
+    client.get_game_center_group_activities("group1")
+    client.get_game_center_group_challenges("group1")
+    client.get_game_center_activity_versions("activity1")
+    client.get_game_center_challenge_versions("challenge1")
+    client.get_game_center_activity_version_localizations("version1")
+    client.get_game_center_challenge_version_localizations("version1")
+
+    endpoints = [e for _m, e, _p, _d in seen]
+    assert "apps/app1/appInfos" in endpoints
+    assert any("inAppPurchases" in e for e in endpoints)
+    assert any("subscriptions" in e for e in endpoints)
+    assert any("appEvents" in e for e in endpoints)
+    assert any("gameCenterDetails" in e for e in endpoints)
+    assert any("gameCenterActivities/activity1/versions" in e for e in endpoints)
