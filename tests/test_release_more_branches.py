@@ -122,3 +122,150 @@ def test_release_run_non_tui_cancel_and_reenter_paths(fake_cli, fake_asc, locali
     answers = iter(["", "", "r", "a", "", ""])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
     assert release.run(fake_cli) is True
+
+
+def test_release_run_non_tui_source_choice_branches(fake_cli, fake_asc, localization_payload, monkeypatch):
+    class NonTUI:
+        def __init__(self, values):
+            self.values = iter(values)
+
+        def available(self):
+            return False
+
+        def prompt_app_id(self, _asc):
+            return "app1"
+
+        def confirm(self, *_a, **_k):
+            return None
+
+        def prompt_multiline(self, *_a, **_k):
+            return next(self.values)
+
+    monkeypatch.setattr(
+        release,
+        "select_platform_versions",
+        lambda *_a, **_k: ({"IOS": {"id": "ver-ios"}}, {"IOS": {"id": "ver-ios"}}, {"IOS": "iOS"}),
+    )
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {
+            "data": [
+                localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+                localization_payload("fr-FR", loc_id="loc-fr", whatsNew="Already translated"),
+            ]
+        },
+    )
+    monkeypatch.setattr(release, "list_presets", lambda: [])
+
+    fake_cli.ui = NonTUI(["Custom source"])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "n")
+    assert release.run(fake_cli) is True
+
+    fake_cli.ui = NonTUI(["Custom source"])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "c")
+    assert release.run(fake_cli) is True
+
+    fake_cli.ui = NonTUI(["unused"])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "invalid")
+    assert release.run(fake_cli) is True
+
+
+def test_release_run_non_tui_edit_empty_and_parsed_empty(fake_cli, fake_asc, localization_payload, monkeypatch):
+    class NonTUI:
+        def __init__(self, value):
+            self.value = value
+
+        def available(self):
+            return False
+
+        def prompt_app_id(self, _asc):
+            return "app1"
+
+        def confirm(self, *_a, **_k):
+            return None
+
+        def prompt_multiline(self, *_a, **_k):
+            return self.value
+
+    monkeypatch.setattr(
+        release,
+        "select_platform_versions",
+        lambda *_a, **_k: ({"IOS": {"id": "ver-ios"}}, {"IOS": {"id": "ver-ios"}}, {"IOS": "iOS"}),
+    )
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {
+            "data": [
+                localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+                localization_payload("fr-FR", loc_id="loc-fr", whatsNew=""),
+            ]
+        },
+    )
+    monkeypatch.setattr(release, "list_presets", lambda: [])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "e")
+
+    fake_cli.ui = NonTUI("")
+    assert release.run(fake_cli) is True
+
+    fake_cli.ui = NonTUI("Edited")
+    monkeypatch.setattr(release, "parse_refinement_template", lambda *_a, **_k: ("", "keep"))
+    assert release.run(fake_cli) is True
+
+
+def test_release_run_non_tui_preset_continue_and_base_empty_custom(fake_cli, fake_asc, localization_payload, monkeypatch):
+    class NonTUI:
+        def __init__(self, value):
+            self.value = value
+
+        def available(self):
+            return False
+
+        def prompt_app_id(self, _asc):
+            return "app1"
+
+        def confirm(self, *_a, **_k):
+            return None
+
+        def prompt_multiline(self, *_a, **_k):
+            return self.value
+
+    preset = ReleaseNotePreset(
+        preset_id="p1",
+        name="Preset One",
+        translations={"en-US": "Preset base"},
+        path=None,
+        built_in=True,
+    )
+
+    monkeypatch.setattr(
+        release,
+        "select_platform_versions",
+        lambda *_a, **_k: ({"IOS": {"id": "ver-ios"}}, {"IOS": {"id": "ver-ios"}}, {"IOS": "iOS"}),
+    )
+
+    # Base present path: first choose preset, get none, then continue with "use".
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {
+            "data": [
+                localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+                localization_payload("fr-FR", loc_id="loc-fr", whatsNew="Already translated"),
+            ]
+        },
+    )
+    monkeypatch.setattr(release, "list_presets", lambda: [preset])
+    monkeypatch.setattr(release, "prompt_preset_selection", lambda *_a, **_k: (None, False))
+    answers = iter(["p", ""])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
+    fake_cli.ui = NonTUI("unused")
+    assert release.run(fake_cli) is True
+
+    # Base empty path with presets: choose custom source through prompt_preset_selection.
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {"data": [localization_payload("en-US", loc_id="loc-en", whatsNew="")]},
+    )
+    monkeypatch.setattr(release, "prompt_preset_selection", lambda *_a, **_k: (None, True))
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "n")
+    fake_cli.ui = NonTUI("Custom base source")
+    assert release.run(fake_cli) is True
