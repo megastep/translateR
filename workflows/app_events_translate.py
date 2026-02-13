@@ -19,9 +19,13 @@ from utils import (
     print_success,
     print_warning,
     provider_model_info,
-    format_progress,
 )
 from workflows.helpers import pick_provider, choose_target_locales, get_app_locales
+from workflows.app_events_helpers import (
+    build_event_locale_id_map,
+    get_event_localizations_with_fallback,
+    save_app_event_localizations,
+)
 
 _DEBUG_APP_EVENTS = os.environ.get("TRANSLATER_DEBUG_APP_EVENTS", "").strip().lower() in ("1", "true", "yes", "y", "on")
 
@@ -259,31 +263,13 @@ def run(cli) -> bool:
             print_error("Missing event id; skipping")
             continue
 
-        loc_resp = asc.get_app_event_localizations(event_id)
-        localizations = loc_resp.get("data", []) if isinstance(loc_resp, dict) else []
+        localizations = get_event_localizations_with_fallback(asc, event_id)
         if not localizations:
-            # Fallback: some accounts intermittently omit attributes on /localizations;
-            # include=localizations is capped at 50 but enough for supported locales.
-            try:
-                fallback = asc.get_app_event(event_id, include_localizations=True)
-                localizations = [
-                    i for i in (fallback.get("included", []) if isinstance(fallback, dict) else [])
-                    if i.get("type") == "appEventLocalizations"
-                ]
-            except Exception:
-                localizations = []
-            if not localizations:
-                print_warning("No existing localizations found; skipping")
-                continue
+            print_warning("No existing localizations found; skipping")
+            continue
 
         primary_locale = attrs.get("primaryLocale")
-        existing_locale_ids: Dict[str, str] = {}
-        for l in localizations:
-            attrs_l = (l.get("attributes", {}) or {})
-            loc_code = (attrs_l.get("locale") or "").strip()
-            loc_id = l.get("id")
-            if loc_code and loc_id:
-                existing_locale_ids[loc_code] = loc_id
+        existing_locale_ids: Dict[str, str] = build_event_locale_id_map(localizations)
         _debug(f"event_id={event_id} existing_locale_ids={sorted(existing_locale_ids.keys())}")
 
         base_locale: Optional[str] = None
@@ -374,155 +360,18 @@ def run(cli) -> bool:
         if errs:
             print_warning(f"Translation errors for {len(errs)}/{len(target_locales)} locales; will save successful ones.")
 
-        saved = 0
-        total_targets = len(target_locales)
-        completed = 0
-        last_progress_len = 0
-        try:
-            line = format_progress(0, total_targets, "Saving locales...")
-            print(line, end="\r")
-            last_progress_len = len(line)
-        except Exception:
-            pass
-
-        def _refresh_locale_ids() -> Dict[str, str]:
-            try:
-                refreshed_map: Dict[str, str] = {}
-                refreshed = asc.get_app_event_localizations(event_id)
-                for l in (refreshed.get("data", []) if isinstance(refreshed, dict) else []):
-                    attrs_l = (l.get("attributes", {}) or {})
-                    loc_code = (attrs_l.get("locale") or "").strip()
-                    loc_id = l.get("id")
-                    if loc_code and loc_id:
-                        refreshed_map[loc_code] = loc_id
-                if not refreshed_map:
-                    fallback = asc.get_app_event(event_id, include_localizations=True)
-                    for item in (fallback.get("included", []) if isinstance(fallback, dict) else []):
-                        if item.get("type") != "appEventLocalizations":
-                            continue
-                        attrs_l = (item.get("attributes", {}) or {})
-                        loc_code = (attrs_l.get("locale") or "").strip()
-                        loc_id = item.get("id")
-                        if loc_code and loc_id:
-                            refreshed_map[loc_code] = loc_id
-                existing_locale_ids.clear()
-                existing_locale_ids.update(refreshed_map)
-                _debug(f"refresh event_id={event_id} locales={sorted(refreshed_map.keys())}")
-                return refreshed_map
-            except Exception:
-                return existing_locale_ids
-
-        for loc, data in results.items():
-            loc_id = _find_existing_locale_id(existing_locale_ids, loc)
-            _debug(f"save locale={loc} loc_id={loc_id or '(none)'}")
-            saved_this_locale = False
-            try:
-                if loc_id:
-                    asc.update_app_event_localization(
-                        loc_id,
-                        name=data.get("name"),
-                        short_description=data.get("shortDescription"),
-                        long_description=data.get("longDescription"),
-                    )
-                else:
-                    time.sleep(0.25)
-                    asc.create_app_event_localization(
-                        event_id,
-                        loc,
-                        name=data.get("name"),
-                        short_description=data.get("shortDescription"),
-                        long_description=data.get("longDescription"),
-                    )
-                    _refresh_locale_ids()
-                saved += 1
-                total_saved += 1
-                completed += 1
-                saved_this_locale = True
-                # Keep an explicit mapping for this requested locale to prevent repeated create attempts
-                if loc_id:
-                    existing_locale_ids[loc] = loc_id
-                try:
-                    line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
-                    pad = max(0, last_progress_len - len(line))
-                    print("\r" + line + (" " * pad), end="")
-                    last_progress_len = len(line)
-                except Exception:
-                    pass
-            except Exception as e:
-                if "409" in str(e) and not _has_validation_error(e):
-                    _debug_http_error(f"409 while saving locale={loc}", e)
-                    # Conflict usually means the locale already exists; refresh and update it.
-                    recovered = False
-                    for attempt in range(4):
-                        try:
-                            refreshed_map = _refresh_locale_ids()
-                            new_id = _find_existing_locale_id(refreshed_map, loc)
-                            _debug(f"recovery attempt={attempt+1} locale={loc} new_id={new_id or '(none)'}")
-                            if new_id:
-                                try:
-                                    asc.update_app_event_localization(
-                                        new_id,
-                                        name=data.get("name"),
-                                        short_description=data.get("shortDescription"),
-                                        long_description=data.get("longDescription"),
-                                    )
-                                    saved += 1
-                                    total_saved += 1
-                                    completed += 1
-                                    existing_locale_ids[loc] = new_id
-                                    try:
-                                        line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
-                                        pad = max(0, last_progress_len - len(line))
-                                        print("\r" + line + (" " * pad), end="")
-                                        last_progress_len = len(line)
-                                    except Exception:
-                                        pass
-                                    recovered = True
-                                    break
-                                except Exception as upd_err:
-                                    if "409" in str(upd_err):
-                                        _debug_http_error(f"409 while updating locale={loc} id={new_id}", upd_err)
-                                    # If it already matches, count as success.
-                                    if "409" in str(upd_err):
-                                        try:
-                                            fetched = asc.get_app_event_localization(new_id)
-                                            f_attrs = fetched.get("data", {}).get("attributes", {}) if isinstance(fetched, dict) else {}
-                                            if (
-                                                f_attrs.get("name") == data.get("name")
-                                                and f_attrs.get("shortDescription") == data.get("shortDescription")
-                                                and f_attrs.get("longDescription") == data.get("longDescription")
-                                            ):
-                                                saved += 1
-                                                total_saved += 1
-                                                completed += 1
-                                                existing_locale_ids[loc] = new_id
-                                                try:
-                                                    line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
-                                                    pad = max(0, last_progress_len - len(line))
-                                                    print("\r" + line + (" " * pad), end="")
-                                                    last_progress_len = len(line)
-                                                except Exception:
-                                                    pass
-                                                recovered = True
-                                                break
-                                        except Exception:
-                                            pass
-                            time.sleep(0.4 * (attempt + 1))
-                        except Exception:
-                            time.sleep(0.4 * (attempt + 1))
-                    if recovered:
-                        saved_this_locale = True
-
-                if saved_this_locale:
-                    continue
-                language_name = APP_STORE_LOCALES.get(loc, loc)
-                _debug_http_error(f"failed locale={loc}", e)
-                print_error(f"  ❌ Failed to save {language_name}: {e}")
-
-        try:
-            print("\r" + (" " * last_progress_len) + "\r", end="")
-        except Exception:
-            pass
+        saved = save_app_event_localizations(
+            asc=asc,
+            event_id=event_id,
+            results=results,
+            target_locales=target_locales,
+            existing_locale_ids=existing_locale_ids,
+            find_existing_locale_id=_find_existing_locale_id,
+            has_validation_error=_has_validation_error,
+            debug=_debug,
+            debug_http_error=_debug_http_error,
+        )
+        total_saved += saved
         print_success(f"Saved {saved}/{len(target_locales)} locales for {label}")
 
     print()
