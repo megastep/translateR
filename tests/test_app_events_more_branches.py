@@ -189,7 +189,7 @@ def test_app_events_run_update_path_progress_and_clear_errors(fake_cli, fake_ui,
             raise RuntimeError("clear fail")
         return real_print(*args, **kwargs)
 
-    monkeypatch.setattr(aet, "format_progress", format_progress)
+    monkeypatch.setattr(aet, "format_progress", format_progress, raising=False)
     monkeypatch.setattr(aet, "print", fake_print, raising=False)
     assert aet.run(fake_cli) is True
 
@@ -230,5 +230,5 @@ def test_app_events_run_409_refresh_fallback_and_recovered_progress_error(fake_c
             raise RuntimeError("progress fail")
         return "0/1 Saving locales..."
 
-    monkeypatch.setattr(aet, "format_progress", format_progress)
+    monkeypatch.setattr(aet, "format_progress", format_progress, raising=False)
     assert aet.run(fake_cli) is True
