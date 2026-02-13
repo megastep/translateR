@@ -1,3 +1,5 @@
+import builtins
+
 from workflows import app_events_translate as aet
 
 
@@ -16,6 +18,10 @@ def test_extract_and_validation_errors_from_exception():
     errors = aet._extract_asc_errors(err)
     assert errors and errors[0]["code"] == "ENTITY_ERROR.ATTRIBUTE.INVALID"
     assert aet._has_validation_error(err) is True
+
+    plain = Exception("plain")
+    assert aet._extract_asc_errors(plain) == []
+    assert aet._has_validation_error(plain) is False
 
 
 def test_ensure_min_len():
@@ -53,3 +59,29 @@ def test_translate_with_min_len_retries_once(fake_provider):
 
     assert out == "ok-value"
     assert calls["n"] == 2
+
+
+def test_prompt_line_and_select_events_non_tui(monkeypatch):
+    class UI:
+        def available(self):
+            return False
+
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+    assert aet._prompt_line(UI(), "message", default="fallback") == "fallback"
+
+    events_asc = type(
+        "ASC",
+        (),
+        {
+            "get_app_events": lambda self, _app_id: {
+                "data": [
+                    {"id": "e1", "attributes": {"referenceName": "Event One"}},
+                    {"id": "e2", "attributes": {"referenceName": "Event Two"}},
+                ]
+            }
+        },
+    )()
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "1")
+    selected = aet._select_app_events(UI(), events_asc, "app1")
+    assert len(selected) == 1
+    assert selected[0]["id"] == "e1"

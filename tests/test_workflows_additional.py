@@ -166,6 +166,15 @@ def test_subscription_pickers_select_groups_and_subs(fake_ui, fake_asc, monkeypa
     assert subs and subs[0]["id"] == "sub1"
 
 
+def test_subscription_mode_selector_non_tui(monkeypatch):
+    class UI:
+        def available(self):
+            return False
+
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "2")
+    assert subscription_translate._mode_selector(UI()) == "group"
+
+
 def test_subscription_run_creates_localization(fake_cli, fake_asc, fake_ui, monkeypatch):
     fake_ui.app_id = "app1"
     fake_ui.select_values.append("sub")
