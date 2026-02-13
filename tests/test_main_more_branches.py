@@ -2,77 +2,7 @@ import builtins
 import types
 
 import main
-
-
-class Cfg:
-    def __init__(self):
-        self.default_provider = "openai"
-        self.models = {
-            "anthropic": {"models": ["a1"], "default_model": "a1"},
-            "openai": {"models": ["o1", "o2"], "default_model": "o1"},
-            "google": {"models": ["g1"], "default_model": "g1"},
-        }
-        self.refine = ""
-        self.saved = None
-
-    def get_ai_provider_key(self, provider):
-        return {"openai": "ok", "anthropic": "ok", "google": "ok"}.get(provider)
-
-    def load_providers(self):
-        out = dict(self.models)
-        out["default_provider"] = self.default_provider
-        return out
-
-    def get_default_model(self, provider):
-        return self.models.get(provider, {}).get("default_model")
-
-    def list_provider_models(self, provider):
-        return list(self.models.get(provider, {}).get("models", []))
-
-    def set_default_model(self, provider, model):
-        if provider not in self.models:
-            return False
-        if model not in self.models[provider]["models"]:
-            return False
-        self.models[provider]["default_model"] = model
-        return True
-
-    def get_default_ai_provider(self):
-        return self.default_provider
-
-    def set_default_ai_provider(self, provider):
-        self.default_provider = provider
-
-    def get_prompt_refinement(self):
-        return self.refine
-
-    def set_prompt_refinement(self, phrase):
-        self.refine = phrase or ""
-
-    def load_api_keys(self):
-        return {
-            "app_store_connect": {"key_id": "", "issuer_id": "", "private_key_path": ""},
-            "ai_providers": {"anthropic": "", "openai": "", "google": ""},
-        }
-
-    def save_api_keys(self, payload):
-        self.saved = payload
-
-
-class UI:
-    def __init__(self, available=False, select_values=None, text_values=None):
-        self._available = available
-        self._select_values = list(select_values or [])
-        self._text_values = list(text_values or [])
-
-    def available(self):
-        return self._available
-
-    def select(self, *_args, **_kwargs):
-        return self._select_values.pop(0) if self._select_values else None
-
-    def text(self, *_args, **_kwargs):
-        return self._text_values.pop(0) if self._text_values else None
+from conftest import MainTestConfig, MainTestUI
 
 
 def test_setup_ai_providers_handles_exceptions(monkeypatch):
@@ -83,7 +13,7 @@ def test_setup_ai_providers_handles_exceptions(monkeypatch):
 
 def test_setup_wizard_existing_key_paths_and_validation(monkeypatch):
     cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
-    cli.config = Cfg()
+    cli.config = MainTestConfig()
     cli.setup_ai_providers = lambda: None
     cli.setup_app_store_client = lambda: True
 
@@ -127,7 +57,7 @@ def test_setup_wizard_existing_key_paths_and_validation(monkeypatch):
 
 def test_setup_wizard_default_provider_choice_branch(monkeypatch):
     cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
-    cli.config = Cfg()
+    cli.config = MainTestConfig()
     cli.setup_ai_providers = lambda: None
     cli.setup_app_store_client = lambda: True
     monkeypatch.setattr(main, "DEFAULT_APPSTORE_P8_DIR", types.SimpleNamespace(exists=lambda: False))
@@ -156,8 +86,8 @@ def test_setup_wizard_default_provider_choice_branch(monkeypatch):
 
 def test_configuration_mode_models_non_tui_branches(monkeypatch):
     cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
-    cli.ui = UI(available=False)
-    cli.config = Cfg()
+    cli.ui = MainTestUI(available=False)
+    cli.config = MainTestConfig()
     cli.asc_client = object()
     cli.ai_manager = types.SimpleNamespace(list_providers=lambda: ["openai"])
     cli.setup_ai_providers = lambda: None
@@ -184,21 +114,21 @@ def test_configuration_mode_models_non_tui_branches(monkeypatch):
 
 def test_configuration_mode_models_tui_branches():
     cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
-    cli.ui = UI(available=True, select_values=["models", None])
-    cli.config = Cfg()
+    cli.ui = MainTestUI(available=True, select_values=["models", None])
+    cli.config = MainTestConfig()
     cli.asc_client = object()
     cli.ai_manager = types.SimpleNamespace(list_providers=lambda: ["openai"])
     cli.setup_ai_providers = lambda: None
     assert main.TranslateRCLI.configuration_mode(cli) is True
 
-    cli.ui = UI(available=True, select_values=["models", "openai", None])
+    cli.ui = MainTestUI(available=True, select_values=["models", "openai", None])
     assert main.TranslateRCLI.configuration_mode(cli) is True
 
 
 def test_configuration_mode_keys_and_no_provider_branches(monkeypatch):
     cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
-    cli.ui = UI(available=True, select_values=["keys"])
-    cli.config = Cfg()
+    cli.ui = MainTestUI(available=True, select_values=["keys"])
+    cli.config = MainTestConfig()
     cli.asc_client = object()
     cli.ai_manager = types.SimpleNamespace(list_providers=lambda: ["openai"])
     cli.setup_wizard = lambda: True
@@ -207,7 +137,7 @@ def test_configuration_mode_keys_and_no_provider_branches(monkeypatch):
     assert main.TranslateRCLI.configuration_mode(cli) is True
     assert calls["n"] >= 1
 
-    cli.ui = UI(available=False)
+    cli.ui = MainTestUI(available=False)
     cli.ai_manager = types.SimpleNamespace(list_providers=lambda: [])
     answers = iter(["2"])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))

@@ -1,22 +1,6 @@
-import requests
-
 from app_store_client import AppStoreConnectClient
 
-
-class DummyResponse:
-    def __init__(self, status_code=400, payload=None, text=""):
-        self.status_code = status_code
-        self._payload = payload if payload is not None else {}
-        self.text = text
-
-    def json(self):
-        return self._payload
-
-
-def _http_error(status=409, payload=None):
-    err = requests.exceptions.HTTPError("http")
-    err.response = DummyResponse(status_code=status, payload=payload or {})
-    return err
+from conftest import build_http_error
 
 
 def test_create_subscription_localization_conflict_updates_existing(monkeypatch):
@@ -26,7 +10,7 @@ def test_create_subscription_localization_conflict_updates_existing(monkeypatch)
 
     def fake_request(method, endpoint, params=None, data=None, max_retries=3):
         if method == "POST" and endpoint == "v1/subscriptionLocalizations":
-            raise _http_error(409)
+            raise build_http_error(409)
         if endpoint == "v1/subscriptions/sub1/subscriptionLocalizations":
             return {"data": [{"id": "loc-fr", "attributes": {"locale": "fr-FR"}}]}
         if method == "PATCH" and endpoint == "v1/subscriptionLocalizations/loc-fr":
@@ -46,7 +30,7 @@ def test_create_app_event_localization_conflict_routes_to_update(monkeypatch):
 
     def fake_request(method, endpoint, params=None, data=None, max_retries=3):
         if method == "POST" and endpoint == "v1/appEventLocalizations":
-            raise _http_error(409)
+            raise build_http_error(409)
         if endpoint == "v1/appEvents/event1/localizations":
             return {"data": [{"id": "evloc-fr", "attributes": {"locale": "fr-FR"}}]}
         if method == "PATCH" and endpoint == "v1/appEventLocalizations/evloc-fr":

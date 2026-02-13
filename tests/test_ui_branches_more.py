@@ -1,70 +1,11 @@
 import builtins
-import types
 
+from conftest import patch_inquirer_import
 from ui import UI
 
 
-class _Exec:
-    def __init__(self, value=None, fail=False):
-        self.value = value
-        self.fail = fail
-
-    def execute(self):
-        if self.fail:
-            raise RuntimeError("execute failed")
-        return self.value
-
-
-class _Inq:
-    def __init__(self, values=None, fail=False):
-        self.values = values or []
-        self.fail = fail
-
-    def select(self, **_kwargs):
-        if self.fail:
-            return _Exec(fail=True)
-        return _Exec(self.values.pop(0))
-
-    def checkbox(self, **_kwargs):
-        if self.fail:
-            return _Exec(fail=True)
-        return _Exec(self.values.pop(0))
-
-    def confirm(self, **_kwargs):
-        if self.fail:
-            return _Exec(fail=True)
-        return _Exec(self.values.pop(0))
-
-    def text(self, **_kwargs):
-        if self.fail:
-            return _Exec(fail=True)
-        return _Exec(self.values.pop(0))
-
-    def editor(self, **_kwargs):
-        if self.fail:
-            return _Exec(fail=True)
-        return _Exec(self.values.pop(0))
-
-    def fuzzy(self, **_kwargs):
-        if self.fail:
-            return _Exec(fail=True)
-        return _Exec(self.values.pop(0))
-
-
-def _patch_inquirer(monkeypatch, values=None, fail=False):
-    fake_module = types.SimpleNamespace(inquirer=_Inq(values=values, fail=fail))
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "InquirerPy":
-            return fake_module
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-
 def test_inquirer_primitives_return_none_on_execute_error(monkeypatch):
-    _patch_inquirer(monkeypatch, fail=True)
+    patch_inquirer_import(monkeypatch, fail=True)
     ui = UI()
     assert ui.select("m", [{"name": "A", "value": "a"}]) is None
     assert ui.checkbox("m", [{"name": "A", "value": "a"}]) is None
@@ -124,13 +65,13 @@ def test_prompt_multiline_console_with_initial_and_eof_error(monkeypatch):
 
 
 def test_fuzzy_picker_manual_and_failure(monkeypatch):
-    _patch_inquirer(monkeypatch, values=["__manual__"])
+    patch_inquirer_import(monkeypatch, values=["__manual__"])
     ui = UI()
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "manual-id")
     apps = [{"id": "a1", "attributes": {"name": "Demo", "bundleId": "x.y"}}]
     assert ui._fuzzy_app_picker(apps) == "manual-id"
 
-    _patch_inquirer(monkeypatch, fail=True)
+    patch_inquirer_import(monkeypatch, fail=True)
     assert ui._fuzzy_app_picker(apps) is None
 
 

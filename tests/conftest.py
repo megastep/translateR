@@ -1,9 +1,11 @@
+import builtins
 import sys
 import types
 from collections import deque
 from pathlib import Path
 
 import pytest
+import requests
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +136,34 @@ class FakeConfig:
         return True
 
 
+class MainTestConfig(FakeConfig):
+    def __init__(self):
+        super().__init__(default_provider="openai")
+        self.models = self._providers
+        self._keys = {"openai": "ok", "anthropic": "ok", "google": "ok"}
+        self._api_keys = {
+            "app_store_connect": {"key_id": "", "issuer_id": "", "private_key_path": ""},
+            "ai_providers": {"anthropic": "", "openai": "", "google": ""},
+        }
+        self.saved = None
+
+    def get_ai_provider_key(self, provider):
+        return self._keys.get(provider)
+
+    def load_api_keys(self):
+        return dict(self._api_keys)
+
+    def save_api_keys(self, payload):
+        self.saved = payload
+
+
+class MainTestUI(FakeUI):
+    def __init__(self, available=False, select_values=None, text_values=None):
+        super().__init__(tui=available)
+        self.select_values.extend(select_values or [])
+        self.text_values.extend(text_values or [])
+
+
 class FakeASC:
     def __init__(self):
         self.responses = {}
@@ -193,7 +223,91 @@ class FakeASC:
     def __getattr__(self, name):
         if name.startswith("__"):
             raise AttributeError(name)
-        return lambda *args, **kwargs: self._record(name, *args, **kwargs)
+        if name in self.responses:
+            return lambda *args, **kwargs: self._record(name, *args, **kwargs)
+        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+
+
+class DummyResponse:
+    def __init__(self, status_code=200, payload=None, headers=None, text="", json_exc=None):
+        self.status_code = status_code
+        self._payload = payload if payload is not None else {}
+        self.headers = headers or {}
+        self.text = text
+        self._json_exc = json_exc
+
+    def json(self):
+        if self._json_exc:
+            raise self._json_exc
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError("http", response=self)
+
+
+def build_http_error(status=409, payload=None, text="", headers=None, json_exc=None):
+    err = requests.exceptions.HTTPError("http")
+    err.response = DummyResponse(
+        status_code=status,
+        payload=payload or {},
+        text=text,
+        headers=headers,
+        json_exc=json_exc,
+    )
+    return err
+
+
+class InquirerExec:
+    def __init__(self, value=None, fail=False):
+        self.value = value
+        self.fail = fail
+
+    def execute(self):
+        if self.fail:
+            raise RuntimeError("execute failed")
+        return self.value
+
+
+class InquirerStub:
+    def __init__(self, values=None, fail=False):
+        self.values = deque(values or [])
+        self.fail = fail
+
+    def _next(self):
+        if self.fail:
+            return InquirerExec(fail=True)
+        return InquirerExec(self.values.popleft() if self.values else None)
+
+    def select(self, **_kwargs):
+        return self._next()
+
+    def checkbox(self, **_kwargs):
+        return self._next()
+
+    def confirm(self, **_kwargs):
+        return self._next()
+
+    def text(self, **_kwargs):
+        return self._next()
+
+    def editor(self, **_kwargs):
+        return self._next()
+
+    def fuzzy(self, **_kwargs):
+        return self._next()
+
+
+def patch_inquirer_import(monkeypatch, values=None, fail=False):
+    fake_module = types.SimpleNamespace(inquirer=InquirerStub(values=values, fail=fail))
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "InquirerPy":
+            return fake_module
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
 
 
 @pytest.fixture

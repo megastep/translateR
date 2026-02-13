@@ -1,23 +1,8 @@
 import copy
 
-import requests
-
 from ai_providers import AnthropicProvider, GoogleGeminiProvider, OpenAIProvider
 
-
-class DummyResponse:
-    def __init__(self, status_code=200, payload=None, headers=None, text=""):
-        self.status_code = status_code
-        self._payload = payload if payload is not None else {}
-        self.headers = headers or {}
-        self.text = text
-
-    def json(self):
-        return self._payload
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.exceptions.HTTPError("http", response=self)
+from conftest import DummyResponse
 
 
 def test_google_translate_retries_without_seed(monkeypatch):

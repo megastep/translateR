@@ -1,26 +1,8 @@
 import copy
 
-import requests
-
 from ai_providers import AIProvider, AnthropicProvider, GoogleGeminiProvider, OpenAIProvider
 
-
-class DummyResponse:
-    def __init__(self, status_code=200, payload=None, headers=None, text="", json_exc=None):
-        self.status_code = status_code
-        self._payload = payload if payload is not None else {}
-        self.headers = headers or {}
-        self.text = text
-        self._json_exc = json_exc
-
-    def json(self):
-        if self._json_exc:
-            raise self._json_exc
-        return self._payload
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.exceptions.HTTPError("http", response=self)
+from conftest import DummyResponse
 
 
 def test_ai_provider_abstract_method_bodies_are_reachable():
