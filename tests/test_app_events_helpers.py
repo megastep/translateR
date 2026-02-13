@@ -85,3 +85,35 @@ def test_prompt_line_and_select_events_non_tui(monkeypatch):
     selected = aet._select_app_events(UI(), events_asc, "app1")
     assert len(selected) == 1
     assert selected[0]["id"] == "e1"
+
+
+def test_prompt_line_prefers_tui_text_value():
+    class UI:
+        def available(self):
+            return True
+
+        def text(self, _message):
+            return "  typed  "
+
+    assert aet._prompt_line(UI(), "message", default="fallback") == "typed"
+
+
+def test_select_app_events_handles_empty_and_invalid_non_tui(monkeypatch):
+    class UI:
+        def available(self):
+            return False
+
+    no_events_asc = type("ASC", (), {"get_app_events": lambda self, _app_id: {"data": []}})()
+    assert aet._select_app_events(UI(), no_events_asc, "app1") == []
+
+    bad_input_asc = type(
+        "ASC",
+        (),
+        {
+            "get_app_events": lambda self, _app_id: {
+                "data": [{"id": "e1", "attributes": {"referenceName": "Event One"}}]
+            }
+        },
+    )()
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "abc")
+    assert aet._select_app_events(UI(), bad_input_asc, "app1") == []
