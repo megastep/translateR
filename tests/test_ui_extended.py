@@ -45,6 +45,45 @@ def test_prompt_app_id_non_tui_manual_when_empty(monkeypatch):
     assert out == "manual-app-id"
 
 
+def test_prompt_app_id_non_tui_next_page_then_select(monkeypatch):
+    ui = UI()
+    monkeypatch.setattr(ui, "available", lambda: False)
+
+    pages = [
+        {
+            "data": [{"id": "app1", "attributes": {"name": "First", "bundleId": "a.first"}}],
+            "next_cursor": "cursor-2",
+        },
+        {
+            "data": [{"id": "app2", "attributes": {"name": "Second", "bundleId": "a.second"}}],
+            "next_cursor": None,
+        },
+    ]
+    asc = FakeASC(pages)
+
+    answers = iter(["n", "1"])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
+    out = ui.prompt_app_id(asc)
+    assert out == "app2"
+
+
+def test_prompt_app_id_non_tui_cancel(monkeypatch):
+    ui = UI()
+    monkeypatch.setattr(ui, "available", lambda: False)
+
+    pages = [
+        {
+            "data": [{"id": "app1", "attributes": {"name": "First", "bundleId": "a.first"}}],
+            "next_cursor": None,
+        }
+    ]
+    asc = FakeASC(pages)
+
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "q")
+    out = ui.prompt_app_id(asc)
+    assert out is None
+
+
 def test_default_editor_cmd_prefers_visual_then_editor(monkeypatch):
     ui = UI()
     monkeypatch.setenv("VISUAL", "code -w")
