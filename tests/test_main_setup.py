@@ -66,3 +66,21 @@ def test_run_handles_keyboard_interrupt(monkeypatch):
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
 
     assert main.TranslateRCLI.run(cli) is None
+
+
+def test_run_handles_runtime_error_then_continues(monkeypatch):
+    cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
+    cli.show_logo = lambda: None
+    cli.setup_app_store_client = lambda: True
+    cli.ai_manager = types.SimpleNamespace(list_providers=lambda: ["openai"])
+    calls = {"n": 0}
+
+    def menu():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        return False
+
+    cli.show_main_menu = menu
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+    assert main.TranslateRCLI.run(cli) is None
