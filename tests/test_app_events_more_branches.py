@@ -126,7 +126,12 @@ def test_app_events_run_conflict_recovery_and_failure_paths(fake_cli, fake_ui, f
     monkeypatch.setattr(aet, "choose_target_locales", lambda *_a, **_k: ["de-DE", "fr-FR"])
     monkeypatch.setattr(aet.time, "sleep", lambda *_a, **_k: None)
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
-    monkeypatch.setattr(aet, "format_progress", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("no progress")))
+    monkeypatch.setattr(
+        aet,
+        "format_progress",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("no progress")),
+        raising=False,
+    )
 
     call_count = {"locs": 0}
 

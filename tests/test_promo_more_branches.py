@@ -119,7 +119,7 @@ def test_promo_run_provider_none_and_tui_reenter_empty(fake_cli, fake_ui, fake_a
             return {loc: "" for loc in targets}, {}
         return {loc: True for loc in targets}, {}
 
-    monkeypatch.setattr(promo, "parallel_map_locales", fake_parallel)
+    monkeypatch.setattr(promo, "parallel_map_locales", fake_parallel, raising=False)
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
     assert promo.run(fake_cli) is True
 
@@ -180,7 +180,7 @@ def test_promo_run_non_tui_reenter_edit_apply_error_and_verify_mismatch(fake_cli
             return {loc: task(loc) for loc in targets}, {}
         return {}, {"fr-FR": "save failed"}
 
-    monkeypatch.setattr(promo, "parallel_map_locales", fake_parallel)
+    monkeypatch.setattr(promo, "parallel_map_locales", fake_parallel, raising=False)
 
     answers = iter(["", "", "r", "e", "fr-FR", "", ""])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
@@ -218,6 +218,6 @@ def test_promo_run_verify_exception_is_swallowed(fake_cli, fake_ui, fake_asc, lo
             return {loc: "ok" for loc in targets}, {}
         return {loc: True for loc in targets}, {}
 
-    monkeypatch.setattr(promo, "parallel_map_locales", fake_parallel)
+    monkeypatch.setattr(promo, "parallel_map_locales", fake_parallel, raising=False)
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
     assert promo.run(fake_cli) is True
