@@ -1,5 +1,6 @@
 import builtins
 
+from app_events_test_helpers import make_event, make_event_loc
 from workflows import app_events_translate as aet
 
 
@@ -13,31 +14,6 @@ class _Resp:
         if self._json_error:
             raise RuntimeError("bad json")
         return self._payload
-
-
-def _event(event_id="event1", primary="en-US"):
-    return {
-        "id": event_id,
-        "attributes": {
-            "referenceName": "Season Event",
-            "eventState": "ACTIVE",
-            "badge": "LIVE",
-            "primaryLocale": primary,
-        },
-    }
-
-
-def _loc(loc_id, locale, name="Name", short="Short", long="Long text"):
-    return {
-        "id": loc_id,
-        "type": "appEventLocalizations",
-        "attributes": {
-            "locale": locale,
-            "name": name,
-            "shortDescription": short,
-            "longDescription": long,
-        },
-    }
 
 
 def test_app_events_debug_and_extract_helper_paths(monkeypatch, fake_provider):
@@ -104,7 +80,7 @@ def test_select_app_events_tui_label_branches(monkeypatch):
 
 def test_app_events_run_fallback_and_target_skip_paths(fake_cli, fake_ui, fake_asc, monkeypatch):
     fake_ui.app_id = "app1"
-    monkeypatch.setattr(aet, "_select_app_events", lambda *_a, **_k: [_event("event1", primary=None)])
+    monkeypatch.setattr(aet, "_select_app_events", lambda *_a, **_k: [make_event("event1", primary=None)])
     monkeypatch.setattr(aet, "pick_provider", lambda cli: (cli.ai_manager.get_provider("fake"), "fake"))
     monkeypatch.setattr(aet, "choose_target_locales", lambda *_a, **_k: [])
     monkeypatch.setattr(aet.time, "sleep", lambda *_a, **_k: None)
@@ -114,14 +90,14 @@ def test_app_events_run_fallback_and_target_skip_paths(fake_cli, fake_ui, fake_a
     fake_asc.set_response("get_app_event", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("fallback failed")))
     assert aet.run(fake_cli) is True
 
-    fake_asc.set_response("get_app_event_localizations", {"data": [_loc("loc-en", "en-US")]})
+    fake_asc.set_response("get_app_event_localizations", {"data": [make_event_loc("loc-en", "en-US")]})
     monkeypatch.setattr(aet, "detect_base_language", lambda *_a, **_k: None)
     assert aet.run(fake_cli) is True
 
 
 def test_app_events_run_conflict_recovery_and_failure_paths(fake_cli, fake_ui, fake_asc, monkeypatch):
     fake_ui.app_id = "app1"
-    monkeypatch.setattr(aet, "_select_app_events", lambda *_a, **_k: [_event("event1")])
+    monkeypatch.setattr(aet, "_select_app_events", lambda *_a, **_k: [make_event("event1")])
     monkeypatch.setattr(aet, "pick_provider", lambda cli: (cli.ai_manager.get_provider("fake"), "fake"))
     monkeypatch.setattr(aet, "choose_target_locales", lambda *_a, **_k: ["de-DE", "fr-FR"])
     monkeypatch.setattr(aet.time, "sleep", lambda *_a, **_k: None)
@@ -138,8 +114,8 @@ def test_app_events_run_conflict_recovery_and_failure_paths(fake_cli, fake_ui, f
     def get_event_locs(_event_id):
         call_count["locs"] += 1
         if call_count["locs"] == 1:
-            return {"data": [_loc("loc-en", "en-US"), _loc("loc-fr", "fr-FR")]}
-        return {"data": [_loc("loc-en", "en-US"), _loc("loc-fr", "fr-FR"), _loc("loc-de", "de-DE")]}
+            return {"data": [make_event_loc("loc-en", "en-US"), make_event_loc("loc-fr", "fr-FR")]}
+        return {"data": [make_event_loc("loc-en", "en-US"), make_event_loc("loc-fr", "fr-FR"), make_event_loc("loc-de", "de-DE")]}
 
     fake_asc.set_response("get_app_event_localizations", get_event_locs)
     fake_asc.set_response(
@@ -166,7 +142,7 @@ def test_app_events_run_conflict_recovery_and_failure_paths(fake_cli, fake_ui, f
     )
     fake_asc.set_response(
         "get_app_event",
-        {"included": [_loc("loc-de", "de-DE", name="Name", short="Short", long="Long text")]},
+        {"included": [make_event_loc("loc-de", "de-DE", name="Name", short="Short", long="Long text")]},
     )
     fake_asc.set_response("get_app_event_localization", {"data": {"attributes": {"name": "Name", "shortDescription": "Short", "longDescription": "Long text"}}})
 
