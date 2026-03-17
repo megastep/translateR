@@ -96,7 +96,10 @@ class FakeConfig:
         self._prompt_refinement = prompt_refinement
         self._providers = providers or {
             "anthropic": {"models": ["claude-sonnet-4-20250514"], "default_model": "claude-sonnet-4-20250514"},
-            "openai": {"models": ["gpt-5.2"], "default_model": "gpt-5.2"},
+            "openai": {
+                "models": ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2"],
+                "default_model": "gpt-5.2",
+            },
             "google": {"models": ["gemini-2.5-flash"], "default_model": "gemini-2.5-flash"},
         }
 

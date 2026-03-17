@@ -39,6 +39,9 @@ def test_set_default_model_validates_model_membership(tmp_path):
     providers = cfg.load_providers()
     openai_models = providers["openai"]["models"]
 
+    assert "gpt-5.4" in openai_models
+    assert "gpt-5.4-mini" in openai_models
+    assert "gpt-5.4-nano" in openai_models
     assert cfg.set_default_model("openai", openai_models[0]) is True
     assert cfg.set_default_model("openai", "non-existent-model") is False
 
