@@ -90,3 +90,12 @@ def test_builtin_presets_available_false(tmp_path, monkeypatch):
     empty_dir.mkdir(parents=True)
     monkeypatch.setattr(release_presets, "BUILTIN_PRESETS_DIR", empty_dir)
     assert release_presets.builtin_presets_available() is False
+
+
+def test_builtin_presets_include_ar_sa():
+    presets = release_presets.list_presets()
+    builtins = [preset for preset in presets if preset.built_in]
+
+    assert builtins
+    for preset in builtins:
+        assert "ar-SA" in preset.translations
