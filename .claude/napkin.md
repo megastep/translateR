@@ -17,6 +17,7 @@
 - Assuming this worktree has a branch name; verify and create a `codex/` branch when detached.
 
 ## Domain Notes
+- 2026-04-01: Apple added 11 App Store metadata languages (50 total). Updated `APP_STORE_LOCALES` using ISO 639–1-style codes (`bn`, `gu`, …) to match existing `hi`; Apple’s “locale shortcodes” DocC article still lists 39 rows—verify in App Store Connect UI if API rejects a locale.
 - Project is a Python CLI orchestrating many workflows via `run(cli)` entrypoints.
 - Network dependencies are App Store Connect and AI provider HTTP APIs; tests must mock both.
 | 2026-02-13 | self | Used `apply_patch` through `exec_command` wrapper | Use the dedicated `apply_patch` tool directly for patch hunks |

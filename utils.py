@@ -13,10 +13,11 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 
 
-# App Store supported locales with their language names
+# App Store supported locales with their language names (50; see App Store Connect Help)
 APP_STORE_LOCALES = {
     "ar-SA": "Arabic",
-    "ca": "Catalan", 
+    "bn": "Bangla",
+    "ca": "Catalan",
     "zh-Hans": "Chinese (Simplified)",
     "zh-Hant": "Chinese (Traditional)",
     "hr": "Croatian",
@@ -24,7 +25,7 @@ APP_STORE_LOCALES = {
     "da": "Danish",
     "nl-NL": "Dutch",
     "en-AU": "English (Australia)",
-    "en-CA": "English (Canada)", 
+    "en-CA": "English (Canada)",
     "en-GB": "English (U.K.)",
     "en-US": "English (U.S.)",
     "fi": "Finnish",
@@ -32,28 +33,38 @@ APP_STORE_LOCALES = {
     "fr-CA": "French (Canada)",
     "de-DE": "German",
     "el": "Greek",
+    "gu": "Gujarati",
     "he": "Hebrew",
     "hi": "Hindi",
     "hu": "Hungarian",
     "id": "Indonesian",
     "it": "Italian",
     "ja": "Japanese",
+    "kn": "Kannada",
     "ko": "Korean",
     "ms": "Malay",
+    "ml": "Malayalam",
+    "mr": "Marathi",
     "no": "Norwegian",
+    "or": "Odia",
     "pl": "Polish",
     "pt-BR": "Portuguese (Brazil)",
     "pt-PT": "Portuguese (Portugal)",
+    "pa": "Punjabi",
     "ro": "Romanian",
     "ru": "Russian",
     "sk": "Slovak",
+    "sl": "Slovenian",
     "es-MX": "Spanish (Mexico)",
     "es-ES": "Spanish (Spain)",
     "sv": "Swedish",
+    "ta": "Tamil",
+    "te": "Telugu",
     "th": "Thai",
     "tr": "Turkish",
     "uk": "Ukrainian",
-    "vi": "Vietnamese"
+    "ur": "Urdu",
+    "vi": "Vietnamese",
 }
 
 # Character limits for App Store fields
