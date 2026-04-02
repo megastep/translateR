@@ -261,59 +261,58 @@ class OpenAIProvider(AIProvider):
             if seed is not None:
                 # Some models may reject seed; we'll retry without it if needed
                 data["seed"] = seed
-            
-            # Send with optional one-time retry without seed if unsupported
-            def _send(current_data):
+
+            def _send_once(current_data):
                 start = time.monotonic()
                 resp = requests.post(url, headers=headers, json=current_data, timeout=self.timeout)
                 dur = int((time.monotonic() - start) * 1000)
                 return resp, dur
 
-            # Retry on transient failures (500/502/503/504, 429, and timeouts)
-            max_attempts = 5
-            retryable_status = {429, 500, 502, 503, 504}
-
             def _is_retryable_http(resp) -> bool:
                 try:
-                    return int(getattr(resp, "status_code", 0)) in retryable_status
+                    return int(getattr(resp, "status_code", 0)) in {429, 500, 502, 503, 504}
                 except Exception:
                     return False
 
-            response = None
-            duration_ms = 0
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    response, duration_ms = _send(data)
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err:
-                    log_ai_error(
-                        "OpenAI GPT",
-                        "Transient network error",
-                        {"attempt": attempt, "max_attempts": max_attempts, "error": str(err), "model": self.model},
-                    )
-                    if attempt >= max_attempts:
-                        raise
-                else:
-                    if response is not None and not _is_retryable_http(response):
-                        break
-                    rid = None
+            def _send_with_retries(current_data):
+                max_attempts = 5
+                response = None
+                duration_ms = 0
+                for attempt in range(1, max_attempts + 1):
                     try:
-                        rid = response.headers.get("x-request-id") or response.headers.get("request-id") or response.headers.get("X-Request-Id")
+                        response, duration_ms = _send_once(current_data)
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err:
+                        log_ai_error(
+                            "OpenAI GPT",
+                            "Transient network error",
+                            {"attempt": attempt, "max_attempts": max_attempts, "error": str(err), "model": self.model},
+                        )
+                        if attempt >= max_attempts:
+                            raise
+                    else:
+                        if response is not None and not _is_retryable_http(response):
+                            return response, duration_ms
+                        rid = None
+                        try:
+                            rid = response.headers.get("x-request-id") or response.headers.get("request-id") or response.headers.get("X-Request-Id")
+                        except Exception:
+                            pass
+                        log_ai_error(
+                            "OpenAI GPT",
+                            "Retryable HTTP status from OpenAI",
+                            {"attempt": attempt, "max_attempts": max_attempts, "status": getattr(response, "status_code", None), "request_id": rid, "model": self.model},
+                        )
+                        if attempt >= max_attempts:
+                            return response, duration_ms
+
+                    backoff = min(20.0, 0.8 * (2 ** (attempt - 1)))
+                    try:
+                        time.sleep(backoff + (0.05 * attempt))
                     except Exception:
                         pass
-                    log_ai_error(
-                        "OpenAI GPT",
-                        "Retryable HTTP status from OpenAI",
-                        {"attempt": attempt, "max_attempts": max_attempts, "status": getattr(response, "status_code", None), "request_id": rid, "model": self.model},
-                    )
-                    if attempt >= max_attempts:
-                        break
+                return response, duration_ms
 
-                # exponential backoff with small jitter
-                backoff = min(20.0, 0.8 * (2 ** (attempt - 1)))
-                try:
-                    time.sleep(backoff + (0.05 * attempt))
-                except Exception:
-                    pass
+            response, duration_ms = _send_with_retries(data)
 
             if response is None:
                 raise Exception("OpenAI request failed: no response")
@@ -329,7 +328,7 @@ class OpenAIProvider(AIProvider):
                     # Log and retry without seed
                     log_ai_error("OpenAI GPT", "Retrying without seed due to model not supporting it", {"model": self.model, "status": response.status_code, "message": msg})
                     data.pop("seed", None)
-                    response, duration_ms = _send(data)
+                    response, duration_ms = _send_with_retries(data)
 
             try:
                 response.raise_for_status()
@@ -380,7 +379,7 @@ class OpenAIProvider(AIProvider):
                 system_message += f" The text MUST be under {max_length} characters INCLUDING SPACES AND PUNCTUATION. Count every character. Prioritize brevity."
                 data["messages"][0]["content"] = system_message
                 
-                response, duration_ms = _send(data)
+                response, duration_ms = _send_with_retries(data)
                 response.raise_for_status()
                 response_data = response.json()
                 translated_text = response_data["choices"][0]["message"]["content"]

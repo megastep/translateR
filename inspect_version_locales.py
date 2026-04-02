@@ -10,7 +10,7 @@ Usage:
 import argparse
 import json
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app_store_client import AppStoreConnectClient
 from config import ConfigManager
@@ -73,7 +73,7 @@ def load_client() -> AppStoreConnectClient:
     )
 
 
-def resolve_target_version_id(client: AppStoreConnectClient, app_id: str, version_id: str | None) -> str:
+def resolve_target_version_id(client: AppStoreConnectClient, app_id: str, version_id: Optional[str]) -> str:
     """Resolve a version id from explicit input or latest version lookup."""
     if version_id:
         return version_id
@@ -83,7 +83,7 @@ def resolve_target_version_id(client: AppStoreConnectClient, app_id: str, versio
     return latest
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Read back App Store version localization locale codes.")
     parser.add_argument("app_id", help="App ID to inspect")
     parser.add_argument("--version-id", help="Explicit App Store version ID to inspect instead of the latest version")

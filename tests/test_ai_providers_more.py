@@ -87,6 +87,27 @@ def test_openai_unexpected_payload_shape_is_wrapped(monkeypatch):
         assert "OpenAI translation failed" in str(e)
 
 
+def test_openai_retries_character_limit_followup(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_post(_url, headers=None, json=None, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return DummyResponse(payload={"choices": [{"message": {"content": "x" * 50}}]})
+        if calls["n"] == 2:
+            return DummyResponse(status_code=500, payload={"error": {"message": "internal"}}, text="internal")
+        return DummyResponse(payload={"choices": [{"message": {"content": "short"}}]})
+
+    monkeypatch.setattr("ai_providers.requests.post", fake_post)
+    monkeypatch.setattr("ai_providers.time.sleep", lambda *_a, **_k: None)
+
+    provider = OpenAIProvider("api-key", "gpt-4.1")
+    out = provider.translate("hi", "French", max_length=10)
+
+    assert out == "short"
+    assert calls["n"] == 3
+
+
 def test_google_seed_cast_failure_and_keyword_refinement(monkeypatch):
     captured = {}
 

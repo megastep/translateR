@@ -43,6 +43,22 @@ def test_create_app_store_version_localization_normalizes_slovenian_locale(monke
     assert post[2]["data"]["attributes"]["locale"] == "sl-SI"
 
 
+def test_create_app_store_version_localization_normalizes_case_insensitive_locale(monkeypatch):
+    client = AppStoreConnectClient("kid", "issuer", "pk")
+    seen = []
+
+    def fake_request(method, endpoint, params=None, data=None, max_retries=3):
+        seen.append((method, endpoint, data))
+        return {"data": {"id": "loc-sl"}}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    client.create_app_store_version_localization("ver1", "SL", "New description")
+
+    post = [x for x in seen if x[0] == "POST" and x[1] == "appStoreVersionLocalizations"][0]
+    assert post[2]["data"]["attributes"]["locale"] == "sl-SI"
+
+
 def test_create_app_store_version_localization_normalizes_new_regioned_locales(monkeypatch):
     client = AppStoreConnectClient("kid", "issuer", "pk")
     seen = []

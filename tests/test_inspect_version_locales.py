@@ -18,6 +18,19 @@ def test_build_locale_rows_sorts_and_labels_known_locales():
     assert rows[2]["name"] == "<unknown>"
 
 
+def test_build_locale_rows_skips_null_attributes():
+    response = {
+        "data": [
+            {"id": "1", "attributes": None},
+            {"id": "2", "attributes": {"locale": "en-US"}},
+        ]
+    }
+
+    rows = ivl.build_locale_rows(response)
+
+    assert rows == [{"locale": "en-US", "name": "English (U.S.)", "id": "2"}]
+
+
 def test_format_locale_rows_emits_readable_table():
     rows = [
         {"locale": "en-US", "name": "English (U.S.)", "id": "loc-1"},

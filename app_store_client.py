@@ -217,7 +217,7 @@ class AppStoreConnectClient:
         locale = (locale or "").strip()
         if not locale:
             return ""
-        return self.LOCALE_ALIASES.get(locale, locale)
+        return self.LOCALE_ALIASES.get(locale.lower(), locale)
 
     def _app_store_version_localization_id_for_locale(self, loc_map: Dict[str, str], locale: str) -> str:
         """Return localization id for an exact locale, with safe fallback for root-only locales.
@@ -331,7 +331,7 @@ class AppStoreConnectClient:
                 try:
                     locs = self.get_app_store_version_localizations(version_id)
                     loc_map = {
-                        l.get("attributes", {}).get("locale"): l.get("id")
+                        (l.get("attributes") or {}).get("locale"): l.get("id")
                         for l in locs.get("data", [])
                         if l.get("id")
                     }
@@ -685,7 +685,7 @@ class AppStoreConnectClient:
                 try:
                     locs = self.get_in_app_purchase_localizations(iap_id)
                     loc_map = {
-                        l.get("attributes", {}).get("locale"): l.get("id")
+                        (l.get("attributes") or {}).get("locale"): l.get("id")
                         for l in locs.get("data", [])
                         if l.get("id")
                     }
@@ -741,7 +741,7 @@ class AppStoreConnectClient:
                 try:
                     locs = self.get_subscription_localizations(subscription_id)
                     loc_map = {
-                        l.get("attributes", {}).get("locale"): l.get("id")
+                        (l.get("attributes") or {}).get("locale"): l.get("id")
                         for l in locs.get("data", []) if l.get("id")
                     }
                     loc_id = loc_map.get(locale)
@@ -808,7 +808,7 @@ class AppStoreConnectClient:
                 try:
                     locs = self.get_subscription_group_localizations(group_id)
                     loc_map = {
-                        l.get("attributes", {}).get("locale"): l.get("id")
+                        (l.get("attributes") or {}).get("locale"): l.get("id")
                         for l in locs.get("data", []) if l.get("id")
                     }
                     loc_id = loc_map.get(locale)
