@@ -89,7 +89,7 @@ def _build_iap_locale_plan(base_locale: str, existing_locale_ids: Dict[str, str]
     }
     preferred = {
         "existing": sorted(existing_minus_base),
-        "missing": sorted(app_locales) if app_locales else None,
+        "missing": sorted(options["missing"].keys()),
         "all": sorted(existing_minus_base),
     }
     return options, preferred

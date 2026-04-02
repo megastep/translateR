@@ -166,6 +166,28 @@ def test_choose_target_locales_strict_invalid_rejects_typo(monkeypatch):
     assert out == []
 
 
+def test_choose_target_locales_tui_marks_preferred_locales_preselected():
+    captured = {}
+
+    class CaptureUI(TinyUI):
+        def checkbox(self, message, choices, add_back=False):
+            captured["message"] = message
+            captured["choices"] = choices
+            captured["add_back"] = add_back
+            return []
+
+    ui = CaptureUI(tui=True)
+    helpers.choose_target_locales(
+        ui,
+        {"fr-FR": "French", "de-DE": "German"},
+        "en-US",
+        preferred_locales=["fr-FR", "de-DE"],
+    )
+
+    enabled = {choice["value"] for choice in captured["choices"] if choice.get("enabled")}
+    assert enabled == {"fr-FR", "de-DE"}
+
+
 def test_select_platform_versions_more_paths(monkeypatch):
     versions = {
         "data": [

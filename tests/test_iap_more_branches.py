@@ -171,3 +171,13 @@ def test_iap_run_reasks_for_target_languages_when_iaps_materially_differ(fake_cl
 
     assert iap.run(fake_cli) is True
     assert prompts == {"scope": 2, "targets": 2}
+
+
+def test_build_iap_locale_plan_preselects_all_missing_locales():
+    options, preferred = iap._build_iap_locale_plan(
+        "en-US",
+        {"en-US": "loc-en", "fr-FR": "loc-fr"},
+        {"fr-FR"},
+    )
+
+    assert preferred["missing"] == sorted(options["missing"].keys())

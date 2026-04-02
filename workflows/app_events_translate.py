@@ -324,7 +324,7 @@ def run(cli) -> bool:
             preferred = sorted(existing_minus_base)
         else:
             available_targets = {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base}
-            preferred = sorted(app_locales) if app_locales else None
+            preferred = sorted(available_targets.keys())
 
         target_locales = choose_target_locales(
             ui,

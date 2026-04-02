@@ -17,6 +17,7 @@
 - OpenAI translation retries must wrap every POST path, including the second pass after character-limit re-translation, or transient 429/5xx failures reappear on the retry path.
 - ASC locale normalization should treat CLI aliases case-insensitively and null-safe any `attributes` access when building localization maps.
 - For bulk IAP translation, share locale-scope and target-language prompts across IAPs only when their base locale and effective locale-option sets match; otherwise re-prompt per materially different group.
+- When a workflow is in “missing/new locales only” mode, preselect the full offered locale list rather than app-locales-only defaults so Enter/confirm applies to every newly creatable locale.
 
 ## Patterns That Don't Work
 - Assuming this worktree has a branch name; verify and create a `codex/` branch when detached.
