@@ -102,7 +102,7 @@ def test_openai_non_flex_timeout_is_lower_by_default(monkeypatch):
     out = provider.translate("hello", "French")
 
     assert out == "ok"
-    assert captured["timeout"] == (10, 30)
+    assert captured["timeout"] == (10, 60)
 
 
 def test_anthropic_http_error_bubbles_as_wrapped_exception(monkeypatch):
