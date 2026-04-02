@@ -119,10 +119,16 @@ def run(cli) -> bool:
         base_locale,
         preferred_locales=preferred,
         prompt="Select languages",
+        strict_invalid=True,
     )
     if not target_locales:
         print_warning("No languages selected")
         return True
+
+    needs_creation = {
+        loc: any(loc not in (existing_by_platform.get(plat) or set()) for plat in selected_versions.keys())
+        for loc in target_locales
+    }
 
     # Fields to update (available in base)
     field_mapping = {
@@ -187,7 +193,7 @@ def run(cli) -> bool:
         language_name = APP_STORE_LOCALES.get(loc, loc)
         translated = {}
         fields_to_translate = set(selected_fields)
-        if allow_create_missing:
+        if allow_create_missing and needs_creation.get(loc):
             # Creating a new App Store version localization requires a description attribute.
             fields_to_translate.add("description")
         for field in fields_to_translate:
@@ -249,13 +255,8 @@ def run(cli) -> bool:
             if locale_scope == "missing":
                 continue
 
-            asc.update_app_store_version_localization(
-                localization_id=loc_id,
-                description=translated.get("description"),
-                keywords=translated.get("keywords"),
-                promotional_text=translated.get("promotional_text"),
-                whats_new=translated.get("whats_new"),
-            )
+            update_payload = {field: translated.get(field) for field in selected_fields if field in translated}
+            asc.update_app_store_version_localization(localization_id=loc_id, **update_payload)
 
     input("\nPress Enter to continue...")
     return True

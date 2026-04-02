@@ -28,16 +28,22 @@ def pick_locale_scope(
             ],
             add_back=True,
         )
-        return picked or default
+        if picked is None:
+            if getattr(ui, "_last_tui_reason", None) == "back":
+                return "back"
+            return default
+        return picked
 
-    raw = input("Locales to include: (e)xisting, (m)issing, (a)ll (Enter = missing): ").strip().lower()
+    raw = input(f"Locales to include: (e)xisting, (m)issing, (a)ll (Enter = {default}): ").strip().lower()
     if raw in ("b", "back"):
         return "back"
     if raw in ("e", "existing"):
         return "existing"
     if raw in ("a", "all", "*"):
         return "all"
-    return "missing"
+    if not raw:
+        return default
+    return default
 
 
 def pick_provider(
@@ -105,6 +111,7 @@ def choose_target_locales(
     base_locale: str,
     preferred_locales: Optional[Iterable[str]] = None,
     prompt: str = "Select target locales",
+    strict_invalid: bool = False,
 ) -> List[str]:
     """Choose target locales from a map of locale -> display name."""
     preferred_locales = set(preferred_locales or [])
@@ -152,10 +159,17 @@ def choose_target_locales(
     raw = input("Enter target locales (comma-separated, 'all' for every locale, Enter = app locales): ").strip()
     if not raw:
         return default_list if default_list else []
+    if raw.lower() in ("b", "back"):
+        return []
     if raw.lower() in ("all", "*"):
         return [loc for loc in available_targets.keys() if loc != base_locale]
     selected = [s.strip() for s in raw.split(',') if s.strip() in available_targets]
-    return selected or default_list
+    if selected:
+        return selected
+    if strict_invalid:
+        print_error("Invalid locale selection")
+        return []
+    return default_list
 
 
 def select_platform_versions(ui, asc_client, app_id: str):

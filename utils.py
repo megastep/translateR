@@ -9,7 +9,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 
 
@@ -231,8 +231,12 @@ def format_progress(current: int, total: int, operation: str = "") -> str:
 # Translation helpers (shared)
 # --------------------------
 
-def provider_model_info(provider: Any, fallback_name: Optional[str] = None) -> (str, Optional[str]):
-    """Return display-friendly provider name and model string."""
+def provider_model_info(provider: Any, fallback_name: Optional[str] = None) -> Tuple[str, Optional[str], Dict[str, str]]:
+    """Return display-friendly provider name, model string, and extra metadata.
+
+    The extra metadata currently includes optional provider-specific hints such
+    as OpenAI service tier.
+    """
     try:
         name = provider.get_name()  # type: ignore[attr-defined]
     except Exception:

@@ -40,9 +40,12 @@ class UI:
                 choices = ([{"name": "← Back", "value": "__back__"}] + list(choices))
             result = inquirer.select(message=message, choices=choices).execute()
             if result == "__back__":
+                self._last_tui_reason = "back"
                 return None
+            self._last_tui_reason = "selected"
             return result
         except Exception:
+            self._last_tui_reason = "error"
             return None
 
     def checkbox(self, message: str, choices: List[dict], add_back: bool = False) -> Optional[List[str]]:
@@ -56,10 +59,13 @@ class UI:
             result = inquirer.checkbox(message=message, choices=choices).execute()
             if isinstance(result, list):
                 if "__back__" in result and len(result) == 1:
+                    self._last_tui_reason = "back"
                     return None
                 result = [v for v in result if v != "__back__"]
+            self._last_tui_reason = "selected"
             return result
         except Exception:
+            self._last_tui_reason = "error"
             return None
 
     def confirm(self, message: str, default: bool = True) -> Optional[bool]:

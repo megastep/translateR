@@ -106,6 +106,44 @@ def test_update_run_task_continue_keywords_truncate_and_missing_platform_locale(
     assert update_localizations.run(fake_cli) is True
 
 
+def test_update_run_does_not_overwrite_selected_fields(fake_cli, fake_ui, fake_asc, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui._tui = False
+    monkeypatch.setattr(update_localizations, "select_platform_versions", lambda *_a, **_k: (_versions(single=False), {}, {}))
+
+    def locs_for_version(version_id):
+        if version_id == "ver-ios":
+            return {
+                "data": [
+                    _loc("loc-en-ios", "en-US", description="Base EN", keywords="base,kw"),
+                    _loc("loc-fr-ios", "fr-FR", description="Old FR", keywords="old,fr"),
+                ]
+            }
+        return {
+            "data": [
+                _loc("loc-en-mac", "en-US", description="Base EN", keywords="base,kw"),
+            ]
+        }
+
+    fake_asc.set_response("get_app_store_version_localizations", locs_for_version)
+    fake_asc.set_response("update_app_store_version_localization", {"data": {"id": "updated"}})
+    fake_asc.set_response("create_app_store_version_localization", {"data": {"id": "created"}})
+    monkeypatch.setattr(update_localizations.time, "sleep", lambda *_a, **_k: None)
+
+    answers = iter(["a", "fr-FR", "keywords", "y", ""])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
+    assert update_localizations.run(fake_cli) is True
+
+    update_calls = [c for c in fake_asc.calls if c[0] == "update_app_store_version_localization"]
+    create_calls = [c for c in fake_asc.calls if c[0] == "create_app_store_version_localization"]
+
+    assert len(update_calls) == 1
+    assert update_calls[0][2] == {"localization_id": "loc-fr-ios", "keywords": "translated-French-base,kw"}
+    assert len(create_calls) == 1
+    assert create_calls[0][2]["description"] == "translated-French-Base EN"
+    assert "keywords" in create_calls[0][2]
+
+
 def test_update_run_warns_on_empty_translations(fake_cli, fake_ui, fake_asc, monkeypatch):
     _setup_base(monkeypatch, fake_ui, fake_asc, [_loc("loc-en", "en-US"), _loc("loc-fr", "fr-FR")], tui=False)
     monkeypatch.setattr(
