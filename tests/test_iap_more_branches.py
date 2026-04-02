@@ -112,3 +112,62 @@ def test_iap_run_create_409_recovery_success_and_refresh_failure(fake_cli, fake_
     fake_asc.set_response("update_in_app_purchase_localization", {"data": {"id": "updated"}})
     monkeypatch.setattr(iap, "format_progress", lambda c, t, m: f"{c}/{t}:{m}")
     assert iap.run(fake_cli) is True
+
+
+def test_iap_run_reuses_target_language_confirmation_for_matching_iaps(fake_cli, fake_ui, fake_asc, monkeypatch):
+    _setup_run(monkeypatch, fake_ui, fake_asc, iap_items=[_iap("iap1"), _iap("iap2", "Pro", "pro.yearly")])
+    prompts = {"scope": 0, "targets": 0}
+
+    def pick_scope(*_args, **_kwargs):
+        prompts["scope"] += 1
+        return "missing"
+
+    def choose_targets(*_args, **_kwargs):
+        prompts["targets"] += 1
+        return ["fr-FR"]
+
+    monkeypatch.setattr(iap, "pick_locale_scope", pick_scope)
+    monkeypatch.setattr(iap, "choose_target_locales", choose_targets)
+    fake_asc.set_response(
+        "get_in_app_purchase_localizations",
+        lambda _iap_id: {"data": [_loc("loc-en", "en-US", name="Base", description="Desc")]},
+    )
+    fake_asc.set_response("create_in_app_purchase_localization", {"data": {"id": "created"}})
+
+    assert iap.run(fake_cli) is True
+    assert prompts == {"scope": 1, "targets": 1}
+
+    creates = [c for c in fake_asc.calls if c[0] == "create_in_app_purchase_localization"]
+    assert len(creates) == 2
+
+
+def test_iap_run_reasks_for_target_languages_when_iaps_materially_differ(fake_cli, fake_ui, fake_asc, monkeypatch):
+    _setup_run(monkeypatch, fake_ui, fake_asc, iap_items=[_iap("iap1"), _iap("iap2", "Pro", "pro.yearly")])
+    prompts = {"scope": 0, "targets": 0}
+
+    def pick_scope(*_args, **_kwargs):
+        prompts["scope"] += 1
+        return "missing"
+
+    def choose_targets(*_args, **_kwargs):
+        prompts["targets"] += 1
+        return ["fr-FR"]
+
+    monkeypatch.setattr(iap, "pick_locale_scope", pick_scope)
+    monkeypatch.setattr(iap, "choose_target_locales", choose_targets)
+
+    def get_locs(iap_id):
+        if iap_id == "iap1":
+            return {"data": [_loc("loc-en", "en-US", name="Base", description="Desc")]}
+        return {
+            "data": [
+                _loc("loc-en-2", "en-US", name="Base", description="Desc"),
+                _loc("loc-fr-2", "fr-FR", name="Nom", description="Desc FR"),
+            ]
+        }
+
+    fake_asc.set_response("get_in_app_purchase_localizations", get_locs)
+    fake_asc.set_response("create_in_app_purchase_localization", {"data": {"id": "created"}})
+
+    assert iap.run(fake_cli) is True
+    assert prompts == {"scope": 2, "targets": 2}

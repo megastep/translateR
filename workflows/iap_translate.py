@@ -6,7 +6,7 @@ configured AI provider.
 """
 
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from utils import (
     APP_STORE_LOCALES,
@@ -77,6 +77,34 @@ def _select_iaps(ui, asc, app_id: str) -> List[Dict]:
     return selected_items
 
 
+def _build_iap_locale_plan(base_locale: str, existing_locale_ids: Dict[str, str], app_locales: set) -> Tuple[Dict[str, Dict[str, str]], Dict[str, Optional[List[str]]]]:
+    """Build locale choice maps for each scope for one IAP."""
+    supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
+    existing_minus_base = {k for k in existing_locale_ids.keys() if k and k != base_locale}
+    missing = {k for k in supported_minus_base.keys() if k not in existing_locale_ids}
+    options = {
+        "existing": {k: supported_minus_base[k] for k in sorted(existing_minus_base) if k in supported_minus_base},
+        "missing": {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base},
+        "all": supported_minus_base,
+    }
+    preferred = {
+        "existing": sorted(existing_minus_base),
+        "missing": sorted(app_locales) if app_locales else None,
+        "all": sorted(existing_minus_base),
+    }
+    return options, preferred
+
+
+def _selection_profile_key(base_locale: str, locale_options: Dict[str, Dict[str, str]]) -> Tuple[str, Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]:
+    """Return a stable key for deciding whether locale prompts can be reused."""
+    return (
+        base_locale,
+        tuple(sorted(locale_options["existing"].keys())),
+        tuple(sorted(locale_options["missing"].keys())),
+        tuple(sorted(locale_options["all"].keys())),
+    )
+
+
 def run(cli) -> bool:
     ui = cli.ui
     asc = cli.asc_client
@@ -105,24 +133,24 @@ def run(cli) -> bool:
     tier_txt = f" — tier: {tier}" if tier else ""
     print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'}{tier_txt} — seed: {seed}")
 
-    total_translated = 0
+    prepared_iaps = []
     for idx, iap in enumerate(selected_iaps, 1):
         attrs = iap.get("attributes", {})
         iap_name = attrs.get("referenceName") or attrs.get("name") or "Untitled IAP"
         product_id = attrs.get("productId", "")
         label = f"{iap_name} [{product_id}]" if product_id else iap_name
-        resource_type = iap.get("type") or "inAppPurchasesV2"
-        print()
-        print_info(f"({idx}/{len(selected_iaps)}) Processing {label}")
-
         loc_resp = asc.get_in_app_purchase_localizations(iap.get("id"))
         localizations = loc_resp.get("data", []) if isinstance(loc_resp, dict) else []
         if not localizations:
+            print()
+            print_info(f"({idx}/{len(selected_iaps)}) Processing {label}")
             print_warning("No existing localization found; unable to detect base language")
             continue
 
         base_locale = detect_base_language(localizations)
         if not base_locale:
+            print()
+            print_info(f"({idx}/{len(selected_iaps)}) Processing {label}")
             print_error("Could not detect base language for this IAP; skipping")
             continue
         base_attrs = next((l.get("attributes", {}) for l in localizations if l.get("attributes", {}).get("locale") == base_locale), {})
@@ -130,36 +158,93 @@ def run(cli) -> bool:
         base_description = base_attrs.get("description", "")
         if not (base_name or "").strip():
             # Name is required for InAppPurchaseLocalizationCreateRequest; without it we cannot create new locales.
+            print()
+            print_info(f"({idx}/{len(selected_iaps)}) Processing {label}")
             print_error("Base localization is missing required name; skipping")
             continue
-        print_info(f"Base language: {APP_STORE_LOCALES.get(base_locale, base_locale)} [{base_locale}]")
-
         existing_locale_ids: Dict[str, str] = {l.get("attributes", {}).get("locale"): l.get("id") for l in localizations if l.get("id")}
+        locale_options, preferred_locales = _build_iap_locale_plan(base_locale, existing_locale_ids, app_locales)
+        prepared_iaps.append(
+            {
+                "iap": iap,
+                "index": idx,
+                "label": label,
+                "base_locale": base_locale,
+                "base_name": base_name,
+                "base_description": base_description,
+                "existing_locale_ids": existing_locale_ids,
+                "locale_options": locale_options,
+                "preferred_locales": preferred_locales,
+                "selection_profile": _selection_profile_key(base_locale, locale_options),
+                "target_locales": [],
+            }
+        )
 
-        scope = pick_locale_scope(ui, default="missing", prompt="Which locales do you want to include for this IAP?")
-        if scope == "back":
-            print_warning("Cancelled; skipping this IAP")
-            continue
+    grouped_iaps: Dict[Tuple[str, Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]], List[Dict]] = {}
+    for ctx in prepared_iaps:
+        grouped_iaps.setdefault(ctx["selection_profile"], []).append(ctx)
 
-        supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
-        existing_minus_base = {k for k in existing_locale_ids.keys() if k and k != base_locale}
-        missing = {k for k in supported_minus_base.keys() if k not in existing_locale_ids}
-        if scope == "existing":
-            available_targets = {k: supported_minus_base[k] for k in sorted(existing_minus_base) if k in supported_minus_base}
-            preferred = sorted(existing_minus_base)
-        elif scope == "all":
-            available_targets = supported_minus_base
-            preferred = sorted(existing_minus_base)
+    for group in grouped_iaps.values():
+        first = group[0]
+        if len(group) > 1:
+            print()
+            print_info(
+                f"Selected IAPs share locale options; choosing target languages once for {len(group)} IAPs"
+            )
+            scope_prompt = "Which locales do you want to include for these IAPs?"
         else:
-            available_targets = {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base}
-            preferred = sorted(app_locales) if app_locales else None
+            scope_prompt = "Which locales do you want to include for this IAP?"
 
-        if not available_targets:
-            print_warning("No locales available for that selection")
+        scope = pick_locale_scope(ui, default="missing", prompt=scope_prompt)
+        if scope == "back":
+            for ctx in group:
+                print()
+                print_info(f"({ctx['index']}/{len(selected_iaps)}) Processing {ctx['label']}")
+                print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                print_warning("Cancelled; skipping this IAP")
             continue
-        target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=preferred, prompt="Select target languages")
+
+        available_targets = first["locale_options"][scope]
+        if not available_targets:
+            for ctx in group:
+                print()
+                print_info(f"({ctx['index']}/{len(selected_iaps)}) Processing {ctx['label']}")
+                print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                print_warning("No locales available for that selection")
+            continue
+
+        target_prompt = "Select target languages for these IAPs" if len(group) > 1 else "Select target languages"
+        target_locales = choose_target_locales(
+            ui,
+            available_targets,
+            first["base_locale"],
+            preferred_locales=first["preferred_locales"][scope],
+            prompt=target_prompt,
+        )
         if not target_locales:
-            print_warning("No target languages selected; skipping this IAP")
+            for ctx in group:
+                print()
+                print_info(f"({ctx['index']}/{len(selected_iaps)}) Processing {ctx['label']}")
+                print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                print_warning("No target languages selected; skipping this IAP")
+            continue
+
+        for ctx in group:
+            ctx["target_locales"] = target_locales
+
+    total_translated = 0
+    for ctx in prepared_iaps:
+        iap = ctx["iap"]
+        label = ctx["label"]
+        base_locale = ctx["base_locale"]
+        base_name = ctx["base_name"]
+        base_description = ctx["base_description"]
+        existing_locale_ids = ctx["existing_locale_ids"]
+        target_locales = ctx["target_locales"]
+        print()
+        print_info(f"({ctx['index']}/{len(selected_iaps)}) Processing {label}")
+        print_info(f"Base language: {APP_STORE_LOCALES.get(base_locale, base_locale)} [{base_locale}]")
+        if not target_locales:
             continue
 
         name_limit = get_field_limit("iap_name") or 30
