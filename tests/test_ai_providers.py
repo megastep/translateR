@@ -12,6 +12,7 @@ def test_provider_manager_add_get_list():
 
     assert manager.get_provider("openai") is provider
     assert manager.list_providers() == ["openai"]
+    assert provider.timeout == (10, 60)
 
 
 def test_openai_translate_retries_without_seed(monkeypatch):

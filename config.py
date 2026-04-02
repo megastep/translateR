@@ -33,8 +33,8 @@ DEFAULT_PROVIDERS_TEMPLATE: Dict[str, Any] = {
         # When empty, TranslateR won't send service_tier and OpenAI will use your project default.
         "service_tier": "",
         # Optional: request timeout in seconds for OpenAI HTTP calls (flex can be slower).
-        # Default timeout (non-flex) stays lower; flex gets a higher default via flex_timeout_seconds.
-        "timeout_seconds": 30,
+        # Default timeout (non-flex) is intentionally conservative but not too short.
+        "timeout_seconds": 60,
         "flex_timeout_seconds": 120,
         "models": [
             "gpt-5.4",
@@ -154,6 +154,15 @@ class ConfigManager:
                 if fallback:
                     existing["default_model"] = fallback
                     changed = True
+
+            timeout_seconds = existing.get("timeout_seconds")
+            try:
+                timeout_value = int(timeout_seconds)
+            except Exception:
+                timeout_value = None
+            if timeout_value is None or timeout_value < 60:
+                existing["timeout_seconds"] = 60
+                changed = True
             
             cfg[provider_name] = existing
         

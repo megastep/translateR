@@ -193,14 +193,14 @@ class OpenAIProvider(AIProvider):
         self.model = model
         self.service_tier = (service_tier or "").strip().lower() or None
         # Requests timeout: (connect timeout, read timeout)
-        # Default is short; flex gets a higher timeout unless explicitly overridden.
+        # Default is 60s for non-flex; flex gets a higher timeout unless explicitly overridden.
         connect_timeout = 10
         if timeout_seconds:
             read_timeout = int(timeout_seconds)
         elif self.service_tier == "flex":
             read_timeout = int(flex_timeout_seconds) if flex_timeout_seconds else 120
         else:
-            read_timeout = 30
+            read_timeout = 60
         self.timeout = (connect_timeout, read_timeout)
     
     def translate(self, text: str, target_language: str,
