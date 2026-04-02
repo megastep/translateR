@@ -228,3 +228,106 @@ def test_subscription_run_409_recovered_update_with_progress_format_exception(fa
     )
     fake_asc.set_response("update_subscription_localization", {"data": {"id": "ok"}})
     assert st.run(fake_cli) is True
+
+
+def test_subscription_run_reuses_target_language_confirmation_for_matching_subscriptions(fake_cli, fake_asc, monkeypatch):
+    fake_cli.ui = _TUI(app_id="app1")
+    monkeypatch.setattr(st, "_mode_selector", lambda _ui: "sub")
+    monkeypatch.setattr(st, "_pick_groups", lambda *_a, **_k: [_group("g1")])
+    monkeypatch.setattr(st, "_pick_subscriptions", lambda *_a, **_k: [_sub("s1"), _sub("s2", "Yearly", "yearly")])
+    monkeypatch.setattr(st, "pick_provider", lambda cli: (cli.ai_manager.get_provider("fake"), "fake"))
+    monkeypatch.setattr(st, "get_app_locales", lambda *_a, **_k: [])
+    monkeypatch.setattr(st.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    prompts = {"scope": 0, "targets": 0}
+
+    def pick_scope(*_args, **_kwargs):
+        prompts["scope"] += 1
+        return "missing"
+
+    def choose_targets(*_args, **_kwargs):
+        prompts["targets"] += 1
+        return ["fr-FR"]
+
+    monkeypatch.setattr(st, "pick_locale_scope", pick_scope)
+    monkeypatch.setattr(st, "choose_target_locales", choose_targets)
+    fake_asc.set_response(
+        "get_subscription_localizations",
+        lambda _sub_id: {"data": [_loc("loc-en", "en-US", name="Base", description="Desc")]},
+    )
+    fake_asc.set_response("create_subscription_localization", {"data": {"id": "created"}})
+
+    assert st.run(fake_cli) is True
+    assert prompts == {"scope": 1, "targets": 1}
+
+
+def test_subscription_run_reasks_for_target_languages_when_subscriptions_materially_differ(fake_cli, fake_asc, monkeypatch):
+    fake_cli.ui = _TUI(app_id="app1")
+    monkeypatch.setattr(st, "_mode_selector", lambda _ui: "sub")
+    monkeypatch.setattr(st, "_pick_groups", lambda *_a, **_k: [_group("g1")])
+    monkeypatch.setattr(st, "_pick_subscriptions", lambda *_a, **_k: [_sub("s1"), _sub("s2", "Yearly", "yearly")])
+    monkeypatch.setattr(st, "pick_provider", lambda cli: (cli.ai_manager.get_provider("fake"), "fake"))
+    monkeypatch.setattr(st, "get_app_locales", lambda *_a, **_k: [])
+    monkeypatch.setattr(st.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    prompts = {"scope": 0, "targets": 0}
+
+    def pick_scope(*_args, **_kwargs):
+        prompts["scope"] += 1
+        return "missing"
+
+    def choose_targets(*_args, **_kwargs):
+        prompts["targets"] += 1
+        return ["fr-FR"]
+
+    monkeypatch.setattr(st, "pick_locale_scope", pick_scope)
+    monkeypatch.setattr(st, "choose_target_locales", choose_targets)
+
+    def get_locs(sub_id):
+        if sub_id == "s1":
+            return {"data": [_loc("loc-en", "en-US", name="Base", description="Desc")]}
+        return {
+            "data": [
+                _loc("loc-en-2", "en-US", name="Base", description="Desc"),
+                _loc("loc-fr-2", "fr-FR", name="Nom", description="Desc FR"),
+            ]
+        }
+
+    fake_asc.set_response("get_subscription_localizations", get_locs)
+    fake_asc.set_response("create_subscription_localization", {"data": {"id": "created"}})
+
+    assert st.run(fake_cli) is True
+    assert prompts == {"scope": 2, "targets": 2}
+
+
+def test_subscription_run_reuses_target_language_confirmation_for_matching_groups(fake_cli, fake_asc, monkeypatch):
+    fake_cli.ui = _TUI(app_id="app1")
+    monkeypatch.setattr(st, "_mode_selector", lambda _ui: "group")
+    monkeypatch.setattr(st, "_pick_groups", lambda *_a, **_k: [_group("g1", "Main"), _group("g2", "Pro")])
+    monkeypatch.setattr(st, "pick_provider", lambda cli: (cli.ai_manager.get_provider("fake"), "fake"))
+    monkeypatch.setattr(st, "get_app_locales", lambda *_a, **_k: [])
+    monkeypatch.setattr(st.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    prompts = {"scope": 0, "targets": 0}
+
+    def pick_scope(*_args, **_kwargs):
+        prompts["scope"] += 1
+        return "missing"
+
+    def choose_targets(*_args, **_kwargs):
+        prompts["targets"] += 1
+        return ["fr-FR"]
+
+    monkeypatch.setattr(st, "pick_locale_scope", pick_scope)
+    monkeypatch.setattr(st, "choose_target_locales", choose_targets)
+    fake_asc.set_response(
+        "get_subscription_group_localizations",
+        lambda _group_id: {"data": [_loc("loc-en", "en-US", name="Base", custom_app_name="Base App")]},
+    )
+    fake_asc.set_response("create_subscription_group_localization", {"data": {"id": "created"}})
+
+    assert st.run(fake_cli) is True
+    assert prompts == {"scope": 1, "targets": 1}

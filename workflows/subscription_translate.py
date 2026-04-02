@@ -5,7 +5,7 @@ Translates subscription name and description to missing locales.
 """
 
 import time
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from utils import (
     APP_STORE_LOCALES,
@@ -20,6 +20,34 @@ from utils import (
     format_progress,
 )
 from workflows.helpers import pick_provider, choose_target_locales, get_app_locales, pick_locale_scope
+
+
+def _build_subscription_locale_plan(base_locale: str, existing_locale_ids: Dict[str, str]) -> Tuple[Dict[str, Dict[str, str]], Dict[str, List[str]]]:
+    """Build locale choice maps for each scope for one subscription item."""
+    supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
+    existing_minus_base = {k for k in existing_locale_ids.keys() if k and k != base_locale}
+    missing = {k for k in supported_minus_base.keys() if k not in existing_locale_ids}
+    options = {
+        "existing": {k: supported_minus_base[k] for k in sorted(existing_minus_base) if k in supported_minus_base},
+        "missing": {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base},
+        "all": supported_minus_base,
+    }
+    preferred = {
+        "existing": sorted(existing_minus_base),
+        "missing": sorted(options["missing"].keys()),
+        "all": sorted(existing_minus_base),
+    }
+    return options, preferred
+
+
+def _selection_profile_key(base_locale: str, locale_options: Dict[str, Dict[str, str]]) -> Tuple[str, Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]:
+    """Return a stable key for deciding whether locale prompts can be reused."""
+    return (
+        base_locale,
+        tuple(sorted(locale_options["existing"].keys())),
+        tuple(sorted(locale_options["missing"].keys())),
+        tuple(sorted(locale_options["all"].keys())),
+    )
 
 
 def _pick_groups(ui, asc, app_id: str) -> List[Dict]:
@@ -148,89 +176,239 @@ def run(cli) -> bool:
     print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'}{tier_txt} — seed: {seed}")
 
     targets = subs if scope == "sub" else groups
-    global_targets: List[str] = []
-    global_targets_enabled = scope == "sub" and len(subs) > 1
 
-    # Preselect targets once for multi-sub runs
-    if global_targets_enabled:
-        first_sub = subs[0]
-        loc_resp = asc.get_subscription_localizations(first_sub.get("id"))
-        locs_first = loc_resp.get("data", []) if isinstance(loc_resp, dict) else []
-        base_locale_first = detect_base_language(locs_first)
-        existing_first = {l.get("attributes", {}).get("locale") for l in locs_first if l.get("attributes", {}).get("locale")}
-        locale_scope = pick_locale_scope(ui, default="missing", prompt="Which locales do you want to include (applies to all selected subscriptions)?")
-        if locale_scope == "back":
-            print_info("Cancelled")
-            return True
-        supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != (base_locale_first or "")}
-        existing_minus_base = {k for k in existing_first if k and k != (base_locale_first or "")}
-        missing = {k for k in supported_minus_base.keys() if k not in existing_first}
-        if locale_scope == "existing":
-            available_targets = {k: supported_minus_base[k] for k in sorted(existing_minus_base) if k in supported_minus_base}
-            preferred = sorted(existing_minus_base)
-        elif locale_scope == "all":
-            available_targets = supported_minus_base
-            preferred = sorted(existing_minus_base)
-        else:
-            available_targets = {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base}
-            preferred = sorted(available_targets.keys())
-        global_targets = choose_target_locales(ui, available_targets, base_locale_first or "", preferred_locales=preferred, prompt="Select target languages")
-
-    for idx, sub in enumerate(targets, 1):
-        attrs = sub.get("attributes", {})
-        if scope == "sub":
+    prepared_subs = []
+    prepared_groups = []
+    if scope == "sub":
+        for idx, sub in enumerate(subs, 1):
+            attrs = sub.get("attributes", {})
             sub_name = attrs.get("name") or "Untitled Subscription"
             product_id = attrs.get("productId", "")
             label = f"{sub_name} [{product_id}]" if product_id else sub_name
+
+            loc_resp = asc.get_subscription_localizations(sub.get("id"))
+            locs = loc_resp.get("data", []) if isinstance(loc_resp, dict) else []
+            if not locs:
+                print()
+                print_info(f"({idx}/{len(subs)}) Processing {label}")
+                print_warning("No existing localizations; skipping")
+                continue
+
+            base_locale = detect_base_language(locs)
+            if not base_locale:
+                print()
+                print_info(f"({idx}/{len(subs)}) Processing {label}")
+                print_error("Could not detect base language; skipping")
+                continue
+
+            base_attrs = next((l.get("attributes", {}) for l in locs if l.get("attributes", {}).get("locale") == base_locale), {})
+            base_name = base_attrs.get("name", "")
+            base_desc = base_attrs.get("description", "")
+            if not base_name:
+                print()
+                print_info(f"({idx}/{len(subs)}) Processing {label}")
+                print_error("Base subscription name missing; skipping")
+                continue
+
+            existing_locale_ids: Dict[str, str] = {l.get("attributes", {}).get("locale"): l.get("id") for l in locs if l.get("id")}
+            existing_locale_attrs: Dict[str, Dict] = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in locs if l.get("attributes")}
+            locale_options, preferred_locales = _build_subscription_locale_plan(base_locale, existing_locale_ids)
+            prepared_subs.append(
+                {
+                    "sub": sub,
+                    "index": idx,
+                    "label": label,
+                    "base_locale": base_locale,
+                    "base_name": base_name,
+                    "base_desc": base_desc,
+                    "existing_locale_ids": existing_locale_ids,
+                    "existing_locale_attrs": existing_locale_attrs,
+                    "locale_options": locale_options,
+                    "preferred_locales": preferred_locales,
+                    "selection_profile": _selection_profile_key(base_locale, locale_options),
+                    "target_locales": [],
+                }
+            )
+
+        grouped_subs: Dict[Tuple[str, Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]], List[Dict]] = {}
+        for ctx in prepared_subs:
+            grouped_subs.setdefault(ctx["selection_profile"], []).append(ctx)
+
+        for group in grouped_subs.values():
+            first = group[0]
+            if len(group) > 1:
+                print()
+                print_info(
+                    f"Selected subscriptions share locale options; choosing target languages once for {len(group)} subscriptions"
+                )
+                scope_prompt = "Which locales do you want to include for these subscriptions?"
+            else:
+                scope_prompt = "Which locales do you want to include?"
+
+            locale_scope = pick_locale_scope(ui, default="missing", prompt=scope_prompt)
+            if locale_scope == "back":
+                for ctx in group:
+                    print()
+                    print_info(f"({ctx['index']}/{len(subs)}) Processing {ctx['label']}")
+                    print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                    print_warning("Cancelled; skipping this subscription")
+                continue
+
+            available_targets = first["locale_options"][locale_scope]
+            if not available_targets:
+                for ctx in group:
+                    print()
+                    print_info(f"({ctx['index']}/{len(subs)}) Processing {ctx['label']}")
+                    print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                    print_warning("No locales available for that selection")
+                continue
+
+            target_prompt = "Select target languages for these subscriptions" if len(group) > 1 else "Select target languages"
+            target_locales = choose_target_locales(
+                ui,
+                available_targets,
+                first["base_locale"],
+                preferred_locales=first["preferred_locales"][locale_scope],
+                prompt=target_prompt,
+            )
+            if not target_locales:
+                for ctx in group:
+                    print()
+                    print_info(f"({ctx['index']}/{len(subs)}) Processing {ctx['label']}")
+                    print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                    print_warning("No target languages selected; skipping this subscription")
+                continue
+
+            for ctx in group:
+                ctx["target_locales"] = [loc for loc in target_locales if loc != ctx["base_locale"]]
+    else:
+        for idx, group in enumerate(groups, 1):
+            attrs = group.get("attributes", {})
+            label = attrs.get("referenceName") or "Subscription Group"
+
+            loc_resp = asc.get_subscription_group_localizations(group.get("id"))
+            locs = loc_resp.get("data", []) if isinstance(loc_resp, dict) else []
+            if not locs:
+                print()
+                print_info(f"({idx}/{len(groups)}) Processing {label}")
+                print_warning("No existing localizations; skipping")
+                continue
+
+            base_locale = detect_base_language(locs)
+            if not base_locale:
+                print()
+                print_info(f"({idx}/{len(groups)}) Processing {label}")
+                print_error("Could not detect base language; skipping")
+                continue
+
+            base_attrs = next((l.get("attributes", {}) for l in locs if l.get("attributes", {}).get("locale") == base_locale), {})
+            base_name = base_attrs.get("name", "")
+            base_desc = base_attrs.get("customAppName", "")
+            if not base_name:
+                print()
+                print_info(f"({idx}/{len(groups)}) Processing {label}")
+                print_error("Base subscription name missing; skipping")
+                continue
+
+            existing_locale_ids = {l.get("attributes", {}).get("locale"): l.get("id") for l in locs if l.get("id")}
+            existing_locale_attrs = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in locs if l.get("attributes")}
+            locale_options, preferred_locales = _build_subscription_locale_plan(base_locale, existing_locale_ids)
+            prepared_groups.append(
+                {
+                    "group": group,
+                    "index": idx,
+                    "label": label,
+                    "base_locale": base_locale,
+                    "base_name": base_name,
+                    "base_desc": base_desc,
+                    "existing_locale_ids": existing_locale_ids,
+                    "existing_locale_attrs": existing_locale_attrs,
+                    "locale_options": locale_options,
+                    "preferred_locales": preferred_locales,
+                    "selection_profile": _selection_profile_key(base_locale, locale_options),
+                    "target_locales": [],
+                }
+            )
+
+        grouped_groups: Dict[Tuple[str, Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]], List[Dict]] = {}
+        for ctx in prepared_groups:
+            grouped_groups.setdefault(ctx["selection_profile"], []).append(ctx)
+
+        for group in grouped_groups.values():
+            first = group[0]
+            if len(group) > 1:
+                print()
+                print_info(
+                    f"Selected subscription groups share locale options; choosing target languages once for {len(group)} groups"
+                )
+                scope_prompt = "Which locales do you want to include for these subscription groups?"
+            else:
+                scope_prompt = "Which locales do you want to include?"
+
+            locale_scope = pick_locale_scope(ui, default="missing", prompt=scope_prompt)
+            if locale_scope == "back":
+                for ctx in group:
+                    print()
+                    print_info(f"({ctx['index']}/{len(groups)}) Processing {ctx['label']}")
+                    print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                    print_warning("Cancelled; skipping this subscription")
+                continue
+
+            available_targets = first["locale_options"][locale_scope]
+            if not available_targets:
+                for ctx in group:
+                    print()
+                    print_info(f"({ctx['index']}/{len(groups)}) Processing {ctx['label']}")
+                    print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                    print_warning("No locales available for that selection")
+                continue
+
+            target_prompt = "Select target languages for these subscription groups" if len(group) > 1 else "Select target languages"
+            target_locales = choose_target_locales(
+                ui,
+                available_targets,
+                first["base_locale"],
+                preferred_locales=first["preferred_locales"][locale_scope],
+                prompt=target_prompt,
+            )
+            if not target_locales:
+                for ctx in group:
+                    print()
+                    print_info(f"({ctx['index']}/{len(groups)}) Processing {ctx['label']}")
+                    print_info(f"Base language: {APP_STORE_LOCALES.get(ctx['base_locale'], ctx['base_locale'])} [{ctx['base_locale']}]")
+                    print_warning("No target languages selected; skipping this subscription")
+                continue
+
+            for ctx in group:
+                ctx["target_locales"] = [loc for loc in target_locales if loc != ctx["base_locale"]]
+
+    for idx, sub in enumerate(targets, 1):
+        if scope == "sub":
+            ctx = next((item for item in prepared_subs if item["sub"].get("id") == sub.get("id")), None)
+            if not ctx:
+                continue
+            label = ctx["label"]
+            base_locale = ctx["base_locale"]
+            base_name = ctx["base_name"]
+            base_desc = ctx["base_desc"]
+            existing_locale_ids = ctx["existing_locale_ids"]
+            existing_locale_attrs = ctx["existing_locale_attrs"]
+            target_locales = ctx["target_locales"]
         else:
-            sub_name = attrs.get("referenceName") or "Subscription Group"
-            label = sub_name
+            ctx = next((item for item in prepared_groups if item["group"].get("id") == sub.get("id")), None)
+            if not ctx:
+                continue
+            label = ctx["label"]
+            base_locale = ctx["base_locale"]
+            base_name = ctx["base_name"]
+            base_desc = ctx["base_desc"]
+            existing_locale_ids = ctx["existing_locale_ids"]
+            existing_locale_attrs = ctx["existing_locale_attrs"]
+            target_locales = ctx["target_locales"]
         print()
         print_info(f"({idx}/{len(targets)}) Processing {label}")
 
-        loc_resp = asc.get_subscription_localizations(sub.get("id")) if scope == "sub" else asc.get_subscription_group_localizations(sub.get("id"))
-        locs = loc_resp.get("data", []) if isinstance(loc_resp, dict) else []
-        if not locs:
-            print_warning("No existing localizations; skipping")
-            continue
-
-        base_locale = detect_base_language(locs)
-        if not base_locale:
-            print_error("Could not detect base language; skipping")
-            continue
-        base_attrs = next((l.get("attributes", {}) for l in locs if l.get("attributes", {}).get("locale") == base_locale), {})
-        base_name = base_attrs.get("name", "")
-        base_desc = base_attrs.get("description", "") if scope == "sub" else base_attrs.get("customAppName", "")
-        if not base_name:
-            print_error("Base subscription name missing; skipping")
-            continue
         print_info(f"Base language: {APP_STORE_LOCALES.get(base_locale, base_locale)} [{base_locale}]")
-
-        existing_locale_ids: Dict[str, str] = {l.get("attributes", {}).get("locale"): l.get("id") for l in locs if l.get("id")}
-        existing_locale_attrs: Dict[str, Dict] = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in locs if l.get("attributes")}
-        if global_targets_enabled and global_targets:
-            # Respect the global scope selection; don't auto-filter to missing-only.
-            target_locales = list(global_targets)
-        else:
-            locale_scope = pick_locale_scope(ui, default="missing", prompt="Which locales do you want to include?")
-            if locale_scope == "back":
-                print_warning("Cancelled; skipping")
-                continue
-            supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
-            existing_minus_base = {k for k in existing_locale_ids.keys() if k and k != base_locale}
-            missing = {k for k in supported_minus_base.keys() if k not in existing_locale_ids}
-            if locale_scope == "existing":
-                available_targets = {k: supported_minus_base[k] for k in sorted(existing_minus_base) if k in supported_minus_base}
-                preferred = sorted(existing_minus_base)
-            elif locale_scope == "all":
-                available_targets = supported_minus_base
-                preferred = sorted(existing_minus_base)
-            else:
-                available_targets = {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base}
-                preferred = sorted(available_targets.keys())
-            target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=preferred, prompt="Select target languages")
-        # Always avoid translating the base locale
-        target_locales = [t for t in target_locales if t != base_locale]
         if not target_locales:
             print_warning("No target languages selected; skipping this subscription")
             continue
