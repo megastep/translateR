@@ -29,6 +29,13 @@ DEFAULT_PROVIDERS_TEMPLATE: Dict[str, Any] = {
     "openai": {
         "name": "OpenAI GPT",
         "class": "OpenAIProvider",
+        # Optional: OpenAI request processing tier. Common values: auto, default, flex, scale, priority.
+        # When empty, TranslateR won't send service_tier and OpenAI will use your project default.
+        "service_tier": "",
+        # Optional: request timeout in seconds for OpenAI HTTP calls (flex can be slower).
+        # Default timeout (non-flex) stays lower; flex gets a higher default via flex_timeout_seconds.
+        "timeout_seconds": 30,
+        "flex_timeout_seconds": 120,
         "models": [
             "gpt-5.4",
             "gpt-5.4-mini",
@@ -130,6 +137,12 @@ class ConfigManager:
             for key in ("name", "class", "models"):
                 if existing.get(key) != defaults.get(key):
                     existing[key] = copy.deepcopy(defaults.get(key))
+                    changed = True
+
+            # Add any new optional keys from the template without overwriting user values.
+            for key, val in defaults.items():
+                if key not in existing:
+                    existing[key] = copy.deepcopy(val)
                     changed = True
             
             models = existing.get("models") or []
@@ -316,6 +329,25 @@ CRITICAL: If you cannot stay within character limits while preserving meaning, p
         cfg[provider_name] = prov
         self.save_providers(cfg)
         return True
+
+    def get_openai_service_tier(self) -> str:
+        """Return configured OpenAI service tier (e.g., 'flex'), or empty string."""
+        cfg = self.load_providers()
+        openai = cfg.get("openai")
+        if isinstance(openai, dict):
+            val = (openai.get("service_tier") or "").strip()
+            return val
+        return ""
+
+    def set_openai_service_tier(self, tier: str) -> None:
+        """Set OpenAI service tier (empty string clears)."""
+        cfg = self.load_providers()
+        openai = cfg.get("openai")
+        if not isinstance(openai, dict):
+            openai = {}
+        openai["service_tier"] = (tier or "").strip()
+        cfg["openai"] = openai
+        self.save_providers(cfg)
 
     # --- Prompt refinement helpers ---
     def get_prompt_refinement(self) -> str:

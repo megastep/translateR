@@ -101,15 +101,15 @@ def test_update_run_selection_provider_and_confirm_branches(fake_cli, fake_ui, f
     monkeypatch.setattr(update_localizations, "select_platform_versions", lambda *_a, **_k: (_version(), {}, {}))
     fake_asc.set_response("get_app_store_version_localizations", {"data": [_loc("loc-en", "en-US"), _loc("loc-fr", "fr-FR")]})
 
-    answers = iter(["", "", ""])
+    answers = iter(["n", "", "", ""])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
     assert update_localizations.run(fake_cli) is True
 
-    answers = iter(["fr-FR", "", ""])
+    answers = iter(["n", "fr-FR", "", ""])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
     assert update_localizations.run(fake_cli) is True
 
-    answers = iter(["fr-FR", "description", "n"])
+    answers = iter(["n", "fr-FR", "description", "n"])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
     assert update_localizations.run(fake_cli) is True
 
@@ -124,6 +124,6 @@ def test_update_run_handles_missing_fields_and_provider(fake_cli, fake_ui, fake_
 
     fake_asc.set_response("get_app_store_version_localizations", {"data": [_loc("loc-en", "en-US"), _loc("loc-fr", "fr-FR")]})
     monkeypatch.setattr(update_localizations, "pick_provider", lambda *_a, **_k: (None, None))
-    answers = iter(["fr-FR", "description"])
+    answers = iter(["n", "fr-FR", "description"])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
     assert update_localizations.run(fake_cli) is True

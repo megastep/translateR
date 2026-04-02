@@ -4,6 +4,7 @@
 | Date | Source | What Went Wrong | What To Do Instead |
 |------|--------|----------------|-------------------|
 | 2026-02-13 | self | Started repository inspection before checking napkin state for this repo | Initialize/read `.claude/napkin.md` first at session start in this repo |
+| 2026-04-02 | self | Interpreted ASC `ENTITY_ERROR.ATTRIBUTE.INVALID` for locale `sl` as “language unsupported” and started removing newer UI locales | When ASC UI and API disagree, first verify the API shortcode; Slovenian is available but the API expects `sl-SI`, not bare `sl` |
 
 ## User Preferences
 - Use `create-plan` output format when requesting plans, then implement directly when asked.
@@ -12,12 +13,12 @@
 ## Patterns That Work
 - Stub workflow dependencies by constructing a lightweight fake `cli` object with `ui`, `asc_client`, `ai_manager`, and `config` fields.
 - Use hermetic tests with monkeypatched `requests` and temp directories for config/filesystem behavior.
+- App Store Connect `POST /v1/appStoreVersionLocalizations` treats `409` as a request-entity conflict; recover by refreshing version localizations and updating an existing locale instead of retrying the same POST.
 
 ## Patterns That Don't Work
 - Assuming this worktree has a branch name; verify and create a `codex/` branch when detached.
 
 ## Domain Notes
-- 2026-04-01: Apple added 11 App Store metadata languages (50 total). Updated `APP_STORE_LOCALES` using ISO 639–1-style codes (`bn`, `gu`, …) to match existing `hi`; Apple’s “locale shortcodes” DocC article still lists 39 rows—verify in App Store Connect UI if API rejects a locale.
 - Project is a Python CLI orchestrating many workflows via `run(cli)` entrypoints.
 - Network dependencies are App Store Connect and AI provider HTTP APIs; tests must mock both.
 | 2026-02-13 | self | Used `apply_patch` through `exec_command` wrapper | Use the dedicated `apply_patch` tool directly for patch hunks |

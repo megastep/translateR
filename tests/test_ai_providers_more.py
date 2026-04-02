@@ -27,7 +27,7 @@ def test_provider_get_name_methods():
 def test_anthropic_retries_after_character_limit(monkeypatch):
     calls = {"n": 0, "payloads": []}
 
-    def fake_post(_url, headers=None, json=None):
+    def fake_post(_url, headers=None, json=None, **_kwargs):
         calls["n"] += 1
         calls["payloads"].append(copy.deepcopy(json))
         if calls["n"] == 1:
@@ -45,7 +45,7 @@ def test_anthropic_retries_after_character_limit(monkeypatch):
 
 
 def test_openai_http_error_when_error_body_not_json(monkeypatch):
-    def fake_post(_url, headers=None, json=None):
+    def fake_post(_url, headers=None, json=None, **_kwargs):
         return DummyResponse(status_code=500, payload={}, text="internal", json_exc=ValueError("bad json"))
 
     monkeypatch.setattr("ai_providers.requests.post", fake_post)
@@ -56,6 +56,24 @@ def test_openai_http_error_when_error_body_not_json(monkeypatch):
         assert False, "expected exception"
     except Exception as e:
         assert "OpenAI API error 500" in str(e)
+
+
+def test_openai_retries_on_500_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_post(_url, headers=None, json=None, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return DummyResponse(status_code=500, payload={"error": {"message": "internal"}}, text="internal")
+        return DummyResponse(payload={"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("ai_providers.requests.post", fake_post)
+    monkeypatch.setattr("ai_providers.time.sleep", lambda *_a, **_k: None)
+
+    provider = OpenAIProvider("api-key", "gpt-4.1")
+    out = provider.translate("hi", "French")
+    assert out == "ok"
+    assert calls["n"] == 2
 
 
 def test_openai_unexpected_payload_shape_is_wrapped(monkeypatch):
@@ -72,7 +90,7 @@ def test_openai_unexpected_payload_shape_is_wrapped(monkeypatch):
 def test_google_seed_cast_failure_and_keyword_refinement(monkeypatch):
     captured = {}
 
-    def fake_post(_url, headers=None, json=None):
+    def fake_post(_url, headers=None, json=None, **_kwargs):
         captured["json"] = copy.deepcopy(json)
         return DummyResponse(payload={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
 

@@ -37,6 +37,7 @@ def test_translate_run_creates_missing_locale(fake_cli, fake_asc, fake_ui, local
 
 def test_update_run_updates_selected_locale(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
     fake_ui.app_id = "app1"
+    fake_ui.select_values.append("existing")
     fake_ui.checkbox_values.extend([["IOS"], ["fr-FR"], ["whats_new"]])
     fake_ui.confirm_values.append(True)
 

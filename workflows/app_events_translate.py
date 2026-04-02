@@ -20,7 +20,7 @@ from utils import (
     print_warning,
     provider_model_info,
 )
-from workflows.helpers import pick_provider, choose_target_locales, get_app_locales
+from workflows.helpers import pick_provider, choose_target_locales, get_app_locales, pick_locale_scope
 from workflows.app_events_helpers import (
     build_event_locale_id_map,
     get_event_localizations_with_fallback,
@@ -241,8 +241,10 @@ def run(cli) -> bool:
 
     refine_phrase = (getattr(cli, "config", None).get_prompt_refinement() if getattr(cli, "config", None) else "") or ""
     seed = getattr(cli, "session_seed", None)
-    pname, pmodel = provider_model_info(provider, provider_key)
-    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
+    pname, pmodel, extra = provider_model_info(provider, provider_key)
+    tier = extra.get("service_tier")
+    tier_txt = f" — tier: {tier}" if tier else ""
+    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'}{tier_txt} — seed: {seed}")
 
     name_limit = get_field_limit("app_event_name") or 30
     short_limit = get_field_limit("app_event_short_description") or 50
@@ -306,12 +308,29 @@ def run(cli) -> bool:
             print_error("Source fields (name/short/long) are required to create new localizations; skipping this event.")
             continue
 
-        available_targets = {k: v for k, v in APP_STORE_LOCALES.items() if k not in existing_locale_ids and k != base_locale}
+        scope = pick_locale_scope(ui, default="missing", prompt="Which locales do you want to include for this event?")
+        if scope == "back":
+            print_warning("Cancelled; skipping this event")
+            continue
+
+        supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
+        existing_minus_base = {k for k in existing_locale_ids.keys() if k and k != base_locale}
+        missing = {k for k in supported_minus_base.keys() if k not in existing_locale_ids}
+        if scope == "existing":
+            available_targets = {k: supported_minus_base[k] for k in sorted(existing_minus_base) if k in supported_minus_base}
+            preferred = sorted(existing_minus_base)
+        elif scope == "all":
+            available_targets = supported_minus_base
+            preferred = sorted(existing_minus_base)
+        else:
+            available_targets = {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base}
+            preferred = sorted(app_locales) if app_locales else None
+
         target_locales = choose_target_locales(
             ui,
             available_targets,
             base_locale,
-            preferred_locales=app_locales,
+            preferred_locales=preferred,
             prompt="Select target languages",
         )
         target_locales = [t for t in target_locales if t != base_locale]

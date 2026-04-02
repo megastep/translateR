@@ -81,6 +81,17 @@ Concurrency (advanced):
 
 - `TRANSLATER_CONCURRENCY` controls how many locales are translated in parallel across workflows that perform translations. Default: number of CPU cores detected.
 
+### Inspect ASC Locale Codes
+
+If App Store Connect UI offers a language but the API rejects your shortcode, read back the exact codes Apple is returning for a version:
+
+```bash
+python3 inspect_version_locales.py <app-id>
+python3 inspect_version_locales.py <app-id> --version-id <app-store-version-id> --json
+```
+
+By default the script resolves the latest App Store version for the app ID you pass, then prints the `attributes.locale` values from `GET /v1/appStoreVersions/{id}/appStoreVersionLocalizations`. Use `--version-id` if you want to inspect a specific version instead.
+
 ### Provider Defaults (optional)
 
 - Set a default AI provider used in workflows: in the CLI, open “⚙️  Configuration” → “Set default AI provider”.

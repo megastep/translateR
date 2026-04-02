@@ -15,6 +15,23 @@ def test_validate_and_get_field_limit():
     assert utils.validate_field_length("anything", "unknown") is True
 
 
+def test_app_store_locales_include_api_shortcode_for_slovenian():
+    assert len(utils.APP_STORE_LOCALES) == 50
+    assert "sl" not in utils.APP_STORE_LOCALES
+    assert utils.APP_STORE_LOCALES["sl-SI"] == "Slovenian"
+    assert utils.APP_STORE_LOCALES["bn-BD"] == "Bangla"
+    assert utils.APP_STORE_LOCALES["gu-IN"] == "Gujarati"
+    assert utils.APP_STORE_LOCALES["kn-IN"] == "Kannada"
+    assert utils.APP_STORE_LOCALES["ml-IN"] == "Malayalam"
+    assert utils.APP_STORE_LOCALES["mr-IN"] == "Marathi"
+    assert utils.APP_STORE_LOCALES["or-IN"] == "Odia"
+    assert utils.APP_STORE_LOCALES["pa-IN"] == "Punjabi"
+    assert utils.APP_STORE_LOCALES["ta-IN"] == "Tamil"
+    assert utils.APP_STORE_LOCALES["te-IN"] == "Telugu"
+    assert utils.APP_STORE_LOCALES["ur-PK"] == "Urdu"
+    assert "hi" in utils.APP_STORE_LOCALES
+
+
 def test_detect_base_language_prefers_english(localization_payload):
     localizations = [
         localization_payload("fr-FR"),
@@ -55,7 +72,7 @@ def test_parallel_map_locales_runs_all_tasks(monkeypatch):
             raise RuntimeError("boom")
         return loc.upper()
 
-    results, errors = utils.parallel_map_locales(["en-US", "fr-FR", "de-DE"], task, progress_action="Testing")
+    results, errors = utils.parallel_map_locales(["en-US", "fr-FR", "de-DE", "en-US"], task, progress_action="Testing")
 
     assert results["en-US"] == "EN-US"
     assert results["de-DE"] == "DE-DE"
