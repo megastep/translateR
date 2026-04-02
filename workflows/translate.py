@@ -129,7 +129,7 @@ def run(cli) -> bool:
         preferred = sorted(existing_minus_base)
     else:
         available_targets = {k: supported_minus_base[k] for k in sorted(missing_or_empty) if k in supported_minus_base}
-        preferred = None
+        preferred = sorted(available_targets.keys())
 
     if not available_targets:
         print_warning("No locales available for that selection")

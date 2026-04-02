@@ -173,7 +173,7 @@ def run(cli) -> bool:
             preferred = sorted(existing_minus_base)
         else:
             available_targets = {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base}
-            preferred = sorted(app_locales) if app_locales else None
+            preferred = sorted(available_targets.keys())
         global_targets = choose_target_locales(ui, available_targets, base_locale_first or "", preferred_locales=preferred, prompt="Select target languages")
 
     for idx, sub in enumerate(targets, 1):
@@ -227,7 +227,7 @@ def run(cli) -> bool:
                 preferred = sorted(existing_minus_base)
             else:
                 available_targets = {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base}
-                preferred = sorted(app_locales) if app_locales else None
+                preferred = sorted(available_targets.keys())
             target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=preferred, prompt="Select target languages")
         # Always avoid translating the base locale
         target_locales = [t for t in target_locales if t != base_locale]
