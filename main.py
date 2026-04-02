@@ -76,7 +76,41 @@ class TranslateRCLI:
             openai_key = self.config.get_ai_provider_key("openai")
             if openai_key:
                 default_model = providers_config.get("openai", {}).get("default_model", "gpt-4.1")
-                openai = OpenAIProvider(openai_key, default_model)
+                # Flex mode / service tier (optional)
+                service_tier = (
+                    os.environ.get("TRANSLATER_OPENAI_SERVICE_TIER")
+                    or os.environ.get("OPENAI_SERVICE_TIER")
+                    or providers_config.get("openai", {}).get("service_tier")
+                    or ""
+                )
+                timeout_seconds = (
+                    os.environ.get("TRANSLATER_OPENAI_TIMEOUT_SECONDS")
+                    or os.environ.get("OPENAI_TIMEOUT_SECONDS")
+                    or providers_config.get("openai", {}).get("timeout_seconds")
+                    or ""
+                )
+                flex_timeout_seconds = (
+                    os.environ.get("TRANSLATER_OPENAI_FLEX_TIMEOUT_SECONDS")
+                    or os.environ.get("OPENAI_FLEX_TIMEOUT_SECONDS")
+                    or providers_config.get("openai", {}).get("flex_timeout_seconds")
+                    or ""
+                )
+                try:
+                    timeout_seconds = int(str(timeout_seconds).strip()) if str(timeout_seconds).strip() else None
+                except Exception:
+                    timeout_seconds = None
+                try:
+                    flex_timeout_seconds = int(str(flex_timeout_seconds).strip()) if str(flex_timeout_seconds).strip() else None
+                except Exception:
+                    flex_timeout_seconds = None
+
+                openai = OpenAIProvider(
+                    openai_key,
+                    default_model,
+                    service_tier=service_tier or None,
+                    timeout_seconds=timeout_seconds,
+                    flex_timeout_seconds=flex_timeout_seconds,
+                )
                 self.ai_manager.add_provider("openai", openai)
             
             # Setup Google Gemini
@@ -503,6 +537,7 @@ class TranslateRCLI:
                     {"name": "Reconfigure API keys (ASC + AI)", "value": "keys"},
                     {"name": "Set default AI provider", "value": "provider"},
                     {"name": "Set default model per provider", "value": "models"},
+                    {"name": "Set OpenAI service tier (flex mode)", "value": "openai_tier"},
                     {"name": "Set translation prompt refinement", "value": "refine"},
                     {"name": "Back", "value": "back"},
                 ]
@@ -512,10 +547,11 @@ class TranslateRCLI:
             print("1) Reconfigure API keys (ASC + AI)")
             print("2) Set default AI provider")
             print("3) Set default model per provider")
-            print("4) Set translation prompt refinement")
-            print("5) Back")
-            raw = input("Select (1-5): ").strip()
-            choice = {"1": "keys", "2": "provider", "3": "models", "4": "refine", "5": "back"}.get(raw, "back")
+            print("4) Set OpenAI service tier (flex mode)")
+            print("5) Set translation prompt refinement")
+            print("6) Back")
+            raw = input("Select (1-6): ").strip()
+            choice = {"1": "keys", "2": "provider", "3": "models", "4": "openai_tier", "5": "refine", "6": "back"}.get(raw, "back")
 
         if choice == "keys":
             # Run the setup wizard to re-enter keys
@@ -620,6 +656,29 @@ class TranslateRCLI:
                         print_error("Failed to set default model")
                 except Exception:
                     print_error("Invalid selection")
+            return True
+        if choice == "openai_tier":
+            current = self.config.get_openai_service_tier() or ""
+            print_info("Set OpenAI service tier for requests (leave blank for project default).")
+            print(f"Current: '{current or '<default>'}'")
+            allowed = ["", "auto", "default", "flex", "scale", "priority"]
+            if self.ui.available():
+                sel = self.ui.select(
+                    "Select OpenAI service tier",
+                    [{"name": (v or "<default>"), "value": v} for v in allowed],
+                    add_back=True,
+                )
+                if sel is None:
+                    return True
+                self.config.set_openai_service_tier(sel)
+            else:
+                raw = input("Enter tier (auto/default/flex/scale/priority) or blank to clear: ").strip().lower()
+                if raw and raw not in allowed:
+                    print_error("Invalid tier")
+                    return True
+                self.config.set_openai_service_tier(raw)
+            print_success("OpenAI service tier updated")
+            self.setup_ai_providers()
             return True
         if choice == "refine":
             # Set global prompt refinement phrase

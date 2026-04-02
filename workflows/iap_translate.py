@@ -20,7 +20,7 @@ from utils import (
     provider_model_info,
     format_progress,
 )
-from workflows.helpers import pick_provider, choose_target_locales, get_app_locales
+from workflows.helpers import pick_provider, choose_target_locales, get_app_locales, pick_locale_scope
 
 
 def _select_iaps(ui, asc, app_id: str) -> List[Dict]:
@@ -100,8 +100,10 @@ def run(cli) -> bool:
         return True
     refine_phrase = (getattr(cli, "config", None).get_prompt_refinement() if getattr(cli, "config", None) else "") or ""
     seed = getattr(cli, "session_seed", None)
-    pname, pmodel = provider_model_info(provider, provider_key)
-    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
+    pname, pmodel, extra = provider_model_info(provider, provider_key)
+    tier = extra.get("service_tier")
+    tier_txt = f" — tier: {tier}" if tier else ""
+    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'}{tier_txt} — seed: {seed}")
 
     total_translated = 0
     for idx, iap in enumerate(selected_iaps, 1):
@@ -133,11 +135,29 @@ def run(cli) -> bool:
         print_info(f"Base language: {APP_STORE_LOCALES.get(base_locale, base_locale)} [{base_locale}]")
 
         existing_locale_ids: Dict[str, str] = {l.get("attributes", {}).get("locale"): l.get("id") for l in localizations if l.get("id")}
-        available_targets = {k: v for k, v in APP_STORE_LOCALES.items() if k not in existing_locale_ids and k != base_locale}
-        if not available_targets:
-            print_warning("All supported languages are already localized for this IAP")
+
+        scope = pick_locale_scope(ui, default="missing", prompt="Which locales do you want to include for this IAP?")
+        if scope == "back":
+            print_warning("Cancelled; skipping this IAP")
             continue
-        target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=app_locales, prompt="Select target languages")
+
+        supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
+        existing_minus_base = {k for k in existing_locale_ids.keys() if k and k != base_locale}
+        missing = {k for k in supported_minus_base.keys() if k not in existing_locale_ids}
+        if scope == "existing":
+            available_targets = {k: supported_minus_base[k] for k in sorted(existing_minus_base) if k in supported_minus_base}
+            preferred = sorted(existing_minus_base)
+        elif scope == "all":
+            available_targets = supported_minus_base
+            preferred = sorted(existing_minus_base)
+        else:
+            available_targets = {k: supported_minus_base[k] for k in sorted(missing) if k in supported_minus_base}
+            preferred = sorted(app_locales) if app_locales else None
+
+        if not available_targets:
+            print_warning("No locales available for that selection")
+            continue
+        target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=preferred, prompt="Select target languages")
         if not target_locales:
             print_warning("No target languages selected; skipping this IAP")
             continue

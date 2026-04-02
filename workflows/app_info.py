@@ -7,7 +7,7 @@ from typing import Dict
 import time
 
 from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, format_progress, parallel_map_locales, provider_model_info
-from workflows.helpers import pick_provider, choose_target_locales
+from workflows.helpers import pick_provider, choose_target_locales, pick_locale_scope
 
 
 def run(cli) -> bool:
@@ -58,12 +58,28 @@ def run(cli) -> bool:
         return True
 
     # Targets
-    available_targets = {loc: APP_STORE_LOCALES[loc] for loc in APP_STORE_LOCALES if loc not in loc_map}
+    scope = pick_locale_scope(ui, default="missing", prompt="Which locales do you want to include?")
+    if scope == "back":
+        print_info("Cancelled")
+        return True
+
+    supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
+    existing_minus_base = {loc for loc in loc_map.keys() if loc and loc != base_locale}
+    missing = {loc for loc in supported_minus_base.keys() if loc not in loc_map}
+    if scope == "existing":
+        available_targets = {loc: supported_minus_base[loc] for loc in sorted(existing_minus_base) if loc in supported_minus_base}
+        preferred = sorted(existing_minus_base)
+    elif scope == "all":
+        available_targets = supported_minus_base
+        preferred = sorted(existing_minus_base)
+    else:
+        available_targets = {loc: supported_minus_base[loc] for loc in sorted(missing) if loc in supported_minus_base}
+        preferred = None
     target_locales = choose_target_locales(
         ui,
         available_targets,
         base_locale,
-        preferred_locales=None,
+        preferred_locales=preferred,
         prompt="Select target languages",
     )
     if not target_locales:
@@ -76,9 +92,11 @@ def run(cli) -> bool:
     # Use global refinement (no per-run prompt here; free text not requested)
     refine_phrase = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
     # Show provider/model and choose seed
-    pname, pmodel = provider_model_info(provider, selected_provider)
+    pname, pmodel, extra = provider_model_info(provider, selected_provider)
     seed = getattr(cli, 'session_seed', None)
-    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
+    tier = extra.get("service_tier")
+    tier_txt = f" — tier: {tier}" if tier else ""
+    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'}{tier_txt} — seed: {seed}")
 
     print_info(f"Starting app name & subtitle translation for {len(target_locales)} languages...")
     def _task(loc: str):

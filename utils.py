@@ -9,14 +9,16 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 
 
-# App Store supported locales with their language names (50; see App Store Connect Help)
+# App Store locale codes used by this CLI for App Store metadata localizations.
+# Some newer ASC UI languages require region-qualified codes in the API
+# (for example Slovenian uses `sl-SI`, not bare `sl`).
 APP_STORE_LOCALES = {
     "ar-SA": "Arabic",
-    "bn": "Bangla",
+    "bn-BD": "Bangla",
     "ca": "Catalan",
     "zh-Hans": "Chinese (Simplified)",
     "zh-Hant": "Chinese (Traditional)",
@@ -33,37 +35,37 @@ APP_STORE_LOCALES = {
     "fr-CA": "French (Canada)",
     "de-DE": "German",
     "el": "Greek",
-    "gu": "Gujarati",
+    "gu-IN": "Gujarati",
     "he": "Hebrew",
     "hi": "Hindi",
     "hu": "Hungarian",
     "id": "Indonesian",
     "it": "Italian",
     "ja": "Japanese",
-    "kn": "Kannada",
+    "kn-IN": "Kannada",
     "ko": "Korean",
     "ms": "Malay",
-    "ml": "Malayalam",
-    "mr": "Marathi",
+    "ml-IN": "Malayalam",
+    "mr-IN": "Marathi",
     "no": "Norwegian",
-    "or": "Odia",
+    "or-IN": "Odia",
     "pl": "Polish",
     "pt-BR": "Portuguese (Brazil)",
     "pt-PT": "Portuguese (Portugal)",
-    "pa": "Punjabi",
+    "pa-IN": "Punjabi",
     "ro": "Romanian",
     "ru": "Russian",
     "sk": "Slovak",
-    "sl": "Slovenian",
+    "sl-SI": "Slovenian",
     "es-MX": "Spanish (Mexico)",
     "es-ES": "Spanish (Spain)",
     "sv": "Swedish",
-    "ta": "Tamil",
-    "te": "Telugu",
+    "ta-IN": "Tamil",
+    "te-IN": "Telugu",
     "th": "Thai",
     "tr": "Turkish",
     "uk": "Ukrainian",
-    "ur": "Urdu",
+    "ur-PK": "Urdu",
     "vi": "Vietnamese",
 }
 
@@ -229,14 +231,23 @@ def format_progress(current: int, total: int, operation: str = "") -> str:
 # Translation helpers (shared)
 # --------------------------
 
-def provider_model_info(provider: Any, fallback_name: Optional[str] = None) -> (str, Optional[str]):
-    """Return display-friendly provider name and model string."""
+def provider_model_info(provider: Any, fallback_name: Optional[str] = None) -> Tuple[str, Optional[str], Dict[str, str]]:
+    """Return display-friendly provider name, model string, and extra metadata.
+
+    The extra metadata currently includes optional provider-specific hints such
+    as OpenAI service tier.
+    """
     try:
         name = provider.get_name()  # type: ignore[attr-defined]
     except Exception:
         name = fallback_name or str(provider)
     model = getattr(provider, "model", None)
-    return name, model
+    extra = {}
+    # OpenAI flex mode / service tier (optional)
+    service_tier = getattr(provider, "service_tier", None)
+    if isinstance(service_tier, str) and service_tier.strip():
+        extra["service_tier"] = service_tier.strip()
+    return name, model, extra
 
 
 def show_provider_and_source(
@@ -252,11 +263,15 @@ def show_provider_and_source(
 
     Accepts optional seed for display; extra kwargs are ignored for forward compatibility.
     """
-    name, model = provider_model_info(provider, provider_key)
+    name, model, extra = provider_model_info(provider, provider_key)
     if seed is not None:
-        print_info(f"AI provider: {name} — model: {model or 'n/a'} — seed: {seed}")
+        tier = extra.get("service_tier")
+        tier_txt = f" — tier: {tier}" if tier else ""
+        print_info(f"AI provider: {name} — model: {model or 'n/a'}{tier_txt} — seed: {seed}")
     else:
-        print_info(f"AI provider: {name} — model: {model or 'n/a'}")
+        tier = extra.get("service_tier")
+        tier_txt = f" — tier: {tier}" if tier else ""
+        print_info(f"AI provider: {name} — model: {model or 'n/a'}{tier_txt}")
     print_info(title + ":")
     print("-" * 60)
     print(f"Language: {APP_STORE_LOCALES.get(base_locale, base_locale)} [{base_locale}]")
@@ -289,6 +304,19 @@ def parallel_map_locales(
     Returns:
         (results_by_locale, errors_by_locale)
     """
+    # De-duplicate locales while preserving order to avoid concurrent work
+    # on the same locale in a single run.
+    seen = set()
+    deduped: List[str] = []
+    for loc in target_locales:
+        if not loc or not isinstance(loc, str):
+            continue
+        if loc in seen:
+            continue
+        seen.add(loc)
+        deduped.append(loc)
+    target_locales = deduped
+
     total = len(target_locales)
     results: Dict[str, Any] = {}
     errors: Dict[str, str] = {}

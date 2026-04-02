@@ -12,12 +12,13 @@ def test_provider_manager_add_get_list():
 
     assert manager.get_provider("openai") is provider
     assert manager.list_providers() == ["openai"]
+    assert provider.timeout == (10, 60)
 
 
 def test_openai_translate_retries_without_seed(monkeypatch):
     calls = {"n": 0, "payloads": []}
 
-    def fake_post(_url, headers=None, json=None):
+    def fake_post(_url, headers=None, json=None, **_kwargs):
         calls["n"] += 1
         calls["payloads"].append(copy.deepcopy(json))
         if calls["n"] == 1:
@@ -42,7 +43,7 @@ def test_openai_translate_retries_without_seed(monkeypatch):
 def test_openai_translate_retries_when_too_long(monkeypatch):
     calls = {"n": 0}
 
-    def fake_post(_url, headers=None, json=None):
+    def fake_post(_url, headers=None, json=None, **_kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             return DummyResponse(payload={"choices": [{"message": {"content": "x" * 50}}]})
@@ -60,7 +61,7 @@ def test_openai_translate_retries_when_too_long(monkeypatch):
 def test_anthropic_translate_formats_request_and_returns_text(monkeypatch):
     captured = {}
 
-    def fake_post(url, headers=None, json=None):
+    def fake_post(url, headers=None, json=None, **_kwargs):
         captured["url"] = url
         captured["headers"] = headers
         captured["json"] = json

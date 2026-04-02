@@ -10,7 +10,7 @@ from utils import (
     print_info, print_warning, print_error, format_progress,
     parallel_map_locales, provider_model_info,
 )
-from workflows.helpers import pick_provider, select_platform_versions
+from workflows.helpers import choose_target_locales, pick_provider, select_platform_versions
 
 
 def run(cli) -> bool:
@@ -54,35 +54,81 @@ def run(cli) -> bool:
         print_error("Could not find base localization data")
         return True
 
-    # Choose languages to update (existing excluding base, across union of platforms)
+    # Choose languages to update (existing, missing, or both)
     existing_by_platform: Dict[str, set] = {}
     for plat, ver in selected_versions.items():
         locs = asc.get_app_store_version_localizations(ver["id"]).get("data", [])
         existing_by_platform[plat] = {l["attributes"]["locale"] for l in locs}
     union_existing = set().union(*existing_by_platform.values())
     existing_locales = [l for l in union_existing if l != base_locale]
-    if not existing_locales:
-        print_warning("No other localizations found to update")
+
+    # Locale scope
+    locale_scope = "existing"  # existing | missing | all
+    if ui.available():
+        picked = ui.select(
+            "Which locales do you want to include?",
+            [
+                {"name": "Existing locales only (update)", "value": "existing"},
+                {"name": "Missing locales only (create)", "value": "missing"},
+                {"name": "All locales (existing + missing)", "value": "all"},
+            ],
+            add_back=True,
+        )
+        if not picked:
+            print_info("Cancelled")
+            return True
+        locale_scope = picked
+    else:
+        raw = input("Locales to include: (e)xisting, (m)issing, (a)ll (Enter = existing): ").strip().lower()
+        if raw in ("b", "back"):
+            print_info("Cancelled")
+            return True
+        if raw in ("m", "missing"):
+            locale_scope = "missing"
+        elif raw in ("a", "all", "*"):
+            locale_scope = "all"
+        else:
+            locale_scope = "existing"
+
+    allow_create_missing = locale_scope in ("missing", "all")
+
+    supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
+    missing_union = [
+        loc
+        for loc in supported_minus_base.keys()
+        if any(loc not in (existing_by_platform.get(plat) or set()) for plat in selected_versions.keys())
+    ]
+
+    if locale_scope == "existing":
+        available_targets = {loc: APP_STORE_LOCALES.get(loc, loc) for loc in existing_locales}
+        preferred = existing_locales
+    elif locale_scope == "missing":
+        available_targets = {loc: supported_minus_base[loc] for loc in missing_union if loc in supported_minus_base}
+        preferred = missing_union
+    else:
+        available_targets = supported_minus_base
+        preferred = existing_locales
+
+    if not available_targets:
+        print_warning("No locales available for that selection")
         return True
 
-    # TUI checkbox
-    if ui.available():
-        choices = [{"name": f"{loc} ({APP_STORE_LOCALES.get(loc, 'Unknown')})", "value": loc} for loc in existing_locales]
-        target_locales = ui.checkbox("Select languages to update (Space to toggle, Enter to confirm)", choices, add_back=True)
-        if not target_locales:
-            print_warning("No languages selected")
-            return True
-    else:
-        for i, loc in enumerate(existing_locales, 1):
-            print(f"{i:2d}. {loc} ({APP_STORE_LOCALES.get(loc, 'Unknown')})")
-        raw = input("Languages to update (comma-separated): ").strip()
-        if not raw:
-            print_warning("No languages selected")
-            return True
-        target_locales = [s.strip() for s in raw.split(',') if s.strip() in existing_locales]
-        if not target_locales:
-            print_warning("No valid languages selected")
-            return True
+    target_locales = choose_target_locales(
+        ui,
+        available_targets,
+        base_locale,
+        preferred_locales=preferred,
+        prompt="Select languages",
+        strict_invalid=True,
+    )
+    if not target_locales:
+        print_warning("No languages selected")
+        return True
+
+    needs_creation = {
+        loc: any(loc not in (existing_by_platform.get(plat) or set()) for plat in selected_versions.keys())
+        for loc in target_locales
+    }
 
     # Fields to update (available in base)
     field_mapping = {
@@ -121,9 +167,11 @@ def run(cli) -> bool:
     # Use global refinement (no per-run prompt here; free text not requested)
     refine_phrase = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
     # Show provider/model and choose seed
-    pname, pmodel = provider_model_info(provider, selected_provider)
+    pname, pmodel, extra = provider_model_info(provider, selected_provider)
     seed = getattr(cli, 'session_seed', None)
-    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
+    tier = extra.get("service_tier")
+    tier_txt = f" — tier: {tier}" if tier else ""
+    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'}{tier_txt} — seed: {seed}")
 
     # Summary
     print_info("Update Summary:")
@@ -144,7 +192,11 @@ def run(cli) -> bool:
     def _task(loc: str):
         language_name = APP_STORE_LOCALES.get(loc, loc)
         translated = {}
-        for field in selected_fields:
+        fields_to_translate = set(selected_fields)
+        if allow_create_missing and needs_creation.get(loc):
+            # Creating a new App Store version localization requires a description attribute.
+            fields_to_translate.add("description")
+        for field in fields_to_translate:
             field_name, source_content = field_mapping[field]
             if not source_content:
                 continue
@@ -178,15 +230,33 @@ def run(cli) -> bool:
                     loc_id = l["id"]
                     break
             if not loc_id:
-                print_warning(f"  Locale {language_name} not found for platform {plat}; skipping")
+                if not allow_create_missing:
+                    print_warning(f"  Locale {language_name} not found for platform {plat}; skipping")
+                    continue
+                # Create missing localization (requires description)
+                desc = (translated.get("description") or "").strip()
+                if not desc:
+                    # Fall back to base description if we couldn't translate for some reason.
+                    desc = (base_data.get("description") or "").strip()
+                if not desc:
+                    print_warning(f"  Locale {language_name} missing description; cannot create for platform {plat}; skipping")
+                    continue
+                asc.create_app_store_version_localization(
+                    version_id=ver["id"],
+                    locale=target_locale,
+                    description=desc,
+                    keywords=translated.get("keywords"),
+                    promotional_text=translated.get("promotional_text"),
+                    whats_new=translated.get("whats_new"),
+                )
                 continue
-            asc.update_app_store_version_localization(
-                localization_id=loc_id,
-                description=translated.get("description"),
-                keywords=translated.get("keywords"),
-                promotional_text=translated.get("promotional_text"),
-                whats_new=translated.get("whats_new"),
-            )
+
+            # Missing-only mode: don't modify already-existing locales.
+            if locale_scope == "missing":
+                continue
+
+            update_payload = {field: translated.get(field) for field in selected_fields if field in translated}
+            asc.update_app_store_version_localization(localization_id=loc_id, **update_payload)
 
     input("\nPress Enter to continue...")
     return True

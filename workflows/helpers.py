@@ -7,6 +7,45 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from utils import APP_STORE_LOCALES, print_error, print_info
 
 
+def pick_locale_scope(
+    ui,
+    *,
+    default: str = "missing",
+    prompt: str = "Which locales do you want to include?",
+) -> str:
+    """Pick locale scope: 'existing', 'missing', or 'all'."""
+    default = (default or "missing").strip().lower()
+    if default not in ("existing", "missing", "all"):
+        default = "missing"
+
+    if ui.available():
+        picked = ui.select(
+            prompt,
+            [
+                {"name": "Existing locales only (update)", "value": "existing"},
+                {"name": "Missing locales only (create)", "value": "missing"},
+                {"name": "All locales (existing + missing)", "value": "all"},
+            ],
+            add_back=True,
+        )
+        if picked is None:
+            if getattr(ui, "_last_tui_reason", None) == "back":
+                return "back"
+            return default
+        return picked
+
+    raw = input(f"Locales to include: (e)xisting, (m)issing, (a)ll (Enter = {default}): ").strip().lower()
+    if raw in ("b", "back"):
+        return "back"
+    if raw in ("e", "existing"):
+        return "existing"
+    if raw in ("a", "all", "*"):
+        return "all"
+    if not raw:
+        return default
+    return default
+
+
 def pick_provider(
     cli,
     prompt: str = "Select AI provider",
@@ -72,6 +111,7 @@ def choose_target_locales(
     base_locale: str,
     preferred_locales: Optional[Iterable[str]] = None,
     prompt: str = "Select target locales",
+    strict_invalid: bool = False,
 ) -> List[str]:
     """Choose target locales from a map of locale -> display name."""
     preferred_locales = set(preferred_locales or [])
@@ -89,17 +129,22 @@ def choose_target_locales(
             {"name": f"{loc} - {nm}", "value": loc, "enabled": loc in default_checked}
             for (loc, nm) in available_targets.items()
         ]
-        selected = ui.checkbox(prompt, choices, add_back=True) or []
+        selected = ui.checkbox(prompt, choices, add_back=True)
+        if not selected:
+            # In TUI mode, an empty selection should behave like "cancel/back".
+            # Manual entry is explicitly available via "__manual__".
+            return []
+        selected = selected or []
         if "__all__" in selected:
             return [loc for loc in available_targets.keys() if loc != base_locale]
         if "__manual__" in selected:
-            selected = []
+            raw = input("Enter target locales (comma-separated): ").strip()
+            if not raw:
+                return []
+            return [s.strip() for s in raw.split(",") if s.strip() in available_targets]
         if selected:
             return [s for s in selected if s in available_targets]
-        raw = input("Enter target locales (comma-separated): ").strip()
-        if not raw:
-            return []
-        return [s.strip() for s in raw.split(',') if s.strip() in available_targets]
+        return []
 
     print("Available target locales:")
     items = list(available_targets.items())
@@ -114,10 +159,17 @@ def choose_target_locales(
     raw = input("Enter target locales (comma-separated, 'all' for every locale, Enter = app locales): ").strip()
     if not raw:
         return default_list if default_list else []
+    if raw.lower() in ("b", "back"):
+        return []
     if raw.lower() in ("all", "*"):
         return [loc for loc in available_targets.keys() if loc != base_locale]
     selected = [s.strip() for s in raw.split(',') if s.strip() in available_targets]
-    return selected or default_list
+    if selected:
+        return selected
+    if strict_invalid:
+        print_error("Invalid locale selection")
+        return []
+    return default_list
 
 
 def select_platform_versions(ui, asc_client, app_id: str):

@@ -23,7 +23,7 @@ from utils import (
     provider_model_info,
     format_progress,
 )
-from workflows.helpers import pick_provider, choose_target_locales, get_app_locales
+from workflows.helpers import pick_provider, choose_target_locales, get_app_locales, pick_locale_scope
 
 
 def _choose_resource_types(ui) -> List[str]:
@@ -572,8 +572,10 @@ def run(cli) -> bool:
         return True
     refine_phrase = (getattr(cli, "config", None).get_prompt_refinement() if getattr(cli, "config", None) else "") or ""
     seed = getattr(cli, "session_seed", None)
-    pname, pmodel = provider_model_info(provider, provider_key)
-    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
+    pname, pmodel, extra = provider_model_info(provider, provider_key)
+    tier = extra.get("service_tier")
+    tier_txt = f" — tier: {tier}" if tier else ""
+    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'}{tier_txt} — seed: {seed}")
 
     # Collect app locales to pre-fill targets
     app_locales = get_app_locales(asc, app_id)
@@ -660,16 +662,33 @@ def run(cli) -> bool:
 
     supported_locales = set(APP_STORE_LOCALES.keys())
     missing_union = set()
+    existing_union = set()
     for record in item_records:
         existing = {l.get("attributes", {}).get("locale") for l in record["localizations"] if l.get("attributes", {}).get("locale")}
+        existing_union.update({loc for loc in existing if loc and loc != base_locale})
         missing = {loc for loc in supported_locales if loc != base_locale and loc not in existing}
         missing_union.update(missing)
 
-    available_targets = {loc: APP_STORE_LOCALES.get(loc, loc) for loc in sorted(missing_union)}
-    if not available_targets:
-        print_warning("All supported languages are already localized for the selected items")
+    scope = pick_locale_scope(ui, default="missing", prompt="Which locales do you want to include?")
+    if scope == "back":
+        print_warning("Cancelled")
         return True
-    target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=app_locales, prompt="Select target locales")
+
+    supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
+    if scope == "existing":
+        available_targets = {loc: supported_minus_base[loc] for loc in sorted(existing_union) if loc in supported_minus_base}
+        preferred = sorted(existing_union)
+    elif scope == "all":
+        available_targets = supported_minus_base
+        preferred = sorted(existing_union)
+    else:
+        available_targets = {loc: supported_minus_base[loc] for loc in sorted(missing_union) if loc in supported_minus_base}
+        preferred = sorted(app_locales) if app_locales else None
+
+    if not available_targets:
+        print_warning("No locales available for that selection")
+        return True
+    target_locales = choose_target_locales(ui, available_targets, base_locale, preferred_locales=preferred, prompt="Select target locales")
     if not target_locales:
         print_warning("No target locales selected")
         return True

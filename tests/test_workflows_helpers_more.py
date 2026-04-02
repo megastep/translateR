@@ -151,6 +151,21 @@ def test_choose_target_locales_paths(monkeypatch):
     assert out == ["de-DE"]
 
 
+def test_choose_target_locales_strict_invalid_rejects_typo(monkeypatch):
+    ui = TinyUI(tui=False)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "zz-ZZ")
+
+    out = helpers.choose_target_locales(
+        ui,
+        {"fr-FR": "French", "de-DE": "German"},
+        "en-US",
+        preferred_locales=["de-DE"],
+        strict_invalid=True,
+    )
+
+    assert out == []
+
+
 def test_select_platform_versions_more_paths(monkeypatch):
     versions = {
         "data": [

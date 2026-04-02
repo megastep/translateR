@@ -99,6 +99,21 @@ def test_choose_target_locales_non_tui_uses_default_preferred(monkeypatch):
     assert out == ["de-DE"]
 
 
+def test_pick_locale_scope_returns_back_in_tui_mode():
+    ui = TinyUI(tui=True)
+    ui.select_value = None
+    ui._last_tui_reason = "back"
+
+    assert helpers.pick_locale_scope(ui, default="missing") == "back"
+
+
+def test_pick_locale_scope_non_tui_honors_default(monkeypatch):
+    ui = TinyUI(tui=False)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert helpers.pick_locale_scope(ui, default="all") == "all"
+
+
 def test_select_platform_versions_handles_empty_versions():
     ui = TinyUI(tui=True)
     asc = types.SimpleNamespace(_request=lambda *_a, **_k: {"data": []})

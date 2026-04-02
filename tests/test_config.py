@@ -57,3 +57,4 @@ def test_sync_provider_catalog_recovers_missing_sections(tmp_path):
 
     assert "anthropic" in providers
     assert providers["openai"]["default_model"] in providers["openai"]["models"]
+    assert providers["openai"]["timeout_seconds"] == 60

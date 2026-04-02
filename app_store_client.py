@@ -20,6 +20,19 @@ class AppStoreConnectClient:
     """Client for interacting with App Store Connect API."""
     
     BASE_URL = "https://api.appstoreconnect.apple.com/v1"
+    LOCALE_ALIASES = {
+        "bn": "bn-BD",
+        "gu": "gu-IN",
+        "kn": "kn-IN",
+        "ml": "ml-IN",
+        "mr": "mr-IN",
+        "or": "or-IN",
+        "pa": "pa-IN",
+        "sl": "sl-SI",
+        "ta": "ta-IN",
+        "te": "te-IN",
+        "ur": "ur-PK",
+    }
     
     def __init__(self, key_id: str, issuer_id: str, private_key: str):
         """
@@ -194,10 +207,39 @@ class AppStoreConnectClient:
     def get_app_store_version_localizations(self, version_id: str) -> Any:
         """Get all localizations for a specific App Store version."""
         return self._request("GET", f"appStoreVersions/{version_id}/appStoreVersionLocalizations")
-    
+
     def get_app_store_version_localization(self, localization_id: str) -> Any:
         """Get a specific localization by ID."""
         return self._request("GET", f"appStoreVersionLocalizations/{localization_id}")
+
+    def _normalize_locale_code(self, locale: Optional[str]) -> str:
+        """Normalize CLI locale codes to the API locale codes expected by ASC."""
+        locale = (locale or "").strip()
+        if not locale:
+            return ""
+        return self.LOCALE_ALIASES.get(locale.lower(), locale)
+
+    def _app_store_version_localization_id_for_locale(self, loc_map: Dict[str, str], locale: str) -> str:
+        """Return localization id for an exact locale, with safe fallback for root-only locales.
+
+        Only allows root matching when the requested locale has no region/script
+        (e.g., "fi" can match "fi-FI"). Never maps "en-AU" to "en-US".
+        """
+        locale = self._normalize_locale_code(locale)
+        if not locale:
+            return ""
+        loc_id = loc_map.get(locale)
+        if loc_id:
+            return loc_id
+        if "-" in locale:
+            return ""
+        root = locale.split("-")[0].lower()
+        matches = [
+            lid
+            for code, lid in loc_map.items()
+            if code and code.split("-")[0].lower() == root and lid
+        ]
+        return matches[0] if len(matches) == 1 else ""
     
     def create_app_store_version_localization(self, version_id: str, locale: str,
                                             description: str, keywords: str = None,
@@ -218,6 +260,7 @@ class AppStoreConnectClient:
             marketing_url: Marketing URL for the localization
             support_url: Support URL for the localization
         """
+        locale = self._normalize_locale_code(locale)
         data = {
             "data": {
                 "type": "appStoreVersionLocalizations",
@@ -248,9 +291,65 @@ class AppStoreConnectClient:
             attributes["marketingUrl"] = marketing_url
         if support_url is not None:
             attributes["supportUrl"] = support_url
-        
-        return self._request("POST", "appStoreVersionLocalizations", data=data)
-    
+
+        try:
+            return self._request("POST", "appStoreVersionLocalizations", data=data, max_retries=0)
+        except requests.exceptions.HTTPError as e:
+            status = getattr(e.response, "status_code", None)
+            if status == 409:
+                req_id = None
+                try:
+                    req_id = e.response.headers.get("x-request-id") or e.response.headers.get("request-id") or e.response.headers.get("X-Request-Id")
+                except Exception:
+                    req_id = None
+                try:
+                    body = e.response.json()
+                except Exception:
+                    body = getattr(e.response, "text", "") or ""
+                if isinstance(body, dict):
+                    errors = body.get("errors", []) or []
+                    details = []
+                    for item in errors[:3]:
+                        if not isinstance(item, dict):
+                            continue
+                        code = item.get("code")
+                        title = item.get("title")
+                        detail = item.get("detail")
+                        parts = [p for p in (code, title, detail) if p]
+                        if parts:
+                            details.append(" | ".join(parts))
+                    detail_txt = "; ".join(details) if details else json.dumps(body, ensure_ascii=False)[:500]
+                else:
+                    detail_txt = str(body)[:500]
+                if req_id or detail_txt:
+                    extra = []
+                    if req_id:
+                        extra.append(f"request_id={req_id}")
+                    if detail_txt:
+                        extra.append(f"detail={detail_txt}")
+                    print(f"⚠️  App Store version localization create conflict for locale={locale}, version_id={version_id} ({', '.join(extra)})")
+                try:
+                    locs = self.get_app_store_version_localizations(version_id)
+                    loc_map = {
+                        (l.get("attributes") or {}).get("locale"): l.get("id")
+                        for l in locs.get("data", [])
+                        if l.get("id")
+                    }
+                    loc_id = self._app_store_version_localization_id_for_locale(loc_map, locale)
+                    if loc_id:
+                        return self.update_app_store_version_localization(
+                            localization_id=loc_id,
+                            description=description,
+                            keywords=keywords,
+                            promotional_text=promotional_text,
+                            whats_new=whats_new,
+                            marketing_url=marketing_url,
+                            support_url=support_url,
+                        )
+                except Exception:
+                    pass
+            raise
+
     def update_app_store_version_localization(self, localization_id: str,
                                             description: str = None,
                                             keywords: str = None,
@@ -586,7 +685,7 @@ class AppStoreConnectClient:
                 try:
                     locs = self.get_in_app_purchase_localizations(iap_id)
                     loc_map = {
-                        l.get("attributes", {}).get("locale"): l.get("id")
+                        (l.get("attributes") or {}).get("locale"): l.get("id")
                         for l in locs.get("data", [])
                         if l.get("id")
                     }
@@ -642,7 +741,7 @@ class AppStoreConnectClient:
                 try:
                     locs = self.get_subscription_localizations(subscription_id)
                     loc_map = {
-                        l.get("attributes", {}).get("locale"): l.get("id")
+                        (l.get("attributes") or {}).get("locale"): l.get("id")
                         for l in locs.get("data", []) if l.get("id")
                     }
                     loc_id = loc_map.get(locale)
@@ -709,7 +808,7 @@ class AppStoreConnectClient:
                 try:
                     locs = self.get_subscription_group_localizations(group_id)
                     loc_map = {
-                        l.get("attributes", {}).get("locale"): l.get("id")
+                        (l.get("attributes") or {}).get("locale"): l.get("id")
                         for l in locs.get("data", []) if l.get("id")
                     }
                     loc_id = loc_map.get(locale)

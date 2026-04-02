@@ -16,7 +16,7 @@ from utils import (
     parallel_map_locales,
     provider_model_info,
 )
-from workflows.helpers import pick_provider, select_platform_versions, choose_target_locales
+from workflows.helpers import pick_provider, select_platform_versions, choose_target_locales, pick_locale_scope
 
 
 def run(cli) -> bool:
@@ -111,9 +111,28 @@ def run(cli) -> bool:
             return True
         return loc in locales_with_empty_description
 
-    available_targets = {k: v for k, v in APP_STORE_LOCALES.items() if _is_locale_available(k)}
+    # Locale scope (existing/missing/all)
+    scope = pick_locale_scope(ui, default="missing", prompt="Which locales do you want to translate?")
+    if scope == "back":
+        print_info("Cancelled")
+        return True
+
+    supported_minus_base = {k: v for k, v in APP_STORE_LOCALES.items() if k != base_locale}
+    existing_minus_base = {loc for loc in union_existing if loc and loc != base_locale}
+    missing_or_empty = {loc for loc in supported_minus_base.keys() if _is_locale_available(loc)}
+
+    if scope == "existing":
+        available_targets = {k: supported_minus_base[k] for k in sorted(existing_minus_base) if k in supported_minus_base}
+        preferred = sorted(existing_minus_base)
+    elif scope == "all":
+        available_targets = supported_minus_base
+        preferred = sorted(existing_minus_base)
+    else:
+        available_targets = {k: supported_minus_base[k] for k in sorted(missing_or_empty) if k in supported_minus_base}
+        preferred = None
+
     if not available_targets:
-        print_warning("All supported languages are already localized for selected platforms")
+        print_warning("No locales available for that selection")
         return True
 
     # Choose targets
@@ -121,7 +140,7 @@ def run(cli) -> bool:
         ui,
         available_targets,
         base_locale,
-        preferred_locales=None,
+        preferred_locales=preferred,
         prompt="Select target languages",
     )
     if not target_locales:
@@ -135,9 +154,11 @@ def run(cli) -> bool:
     # Use global refinement (no per-run prompt here; free text not requested)
     refine_phrase = (getattr(cli, 'config', None).get_prompt_refinement() if getattr(cli, 'config', None) else "") or ""
     # Show provider/model and choose seed for this run
-    pname, pmodel = provider_model_info(provider, selected_provider)
+    pname, pmodel, extra = provider_model_info(provider, selected_provider)
     seed = getattr(cli, 'session_seed', None)
-    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'} — seed: {seed}")
+    tier = extra.get("service_tier")
+    tier_txt = f" — tier: {tier}" if tier else ""
+    print_info(f"AI provider: {pname} — model: {pmodel or 'n/a'}{tier_txt} — seed: {seed}")
 
     # Translate and create per platform (parallel by locale)
     print_info(f"Starting translation for {len(target_locales)} languages across {len(selected_versions)} platform(s)...")

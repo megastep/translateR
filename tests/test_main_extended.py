@@ -56,6 +56,12 @@ class DummyConfig:
     def set_prompt_refinement(self, phrase):
         self.refine = phrase or ""
 
+    def get_openai_service_tier(self):
+        return ""
+
+    def set_openai_service_tier(self, _tier):
+        return None
+
 
 def test_setup_ai_providers_loads_all_providers(monkeypatch):
     cli = main.TranslateRCLI.__new__(main.TranslateRCLI)
@@ -73,7 +79,7 @@ def test_setup_ai_providers_loads_all_providers(monkeypatch):
 
     monkeypatch.setattr(main, "AIProviderManager", ProviderManager)
     monkeypatch.setattr(main, "AnthropicProvider", lambda key, model: ("anthropic", key, model))
-    monkeypatch.setattr(main, "OpenAIProvider", lambda key, model: ("openai", key, model))
+    monkeypatch.setattr(main, "OpenAIProvider", lambda key, model, **kwargs: ("openai", key, model, kwargs))
     monkeypatch.setattr(main, "GoogleGeminiProvider", lambda key, model: ("google", key, model))
 
     main.TranslateRCLI.setup_ai_providers(cli)
@@ -102,7 +108,7 @@ def test_configuration_mode_refine_branch_non_tui(monkeypatch):
     cli.asc_client = object()
     cli.ai_manager = types.SimpleNamespace(list_providers=lambda: ["openai"])
 
-    answers = iter(["4", "keep brands"])
+    answers = iter(["5", "keep brands"])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
 
     assert main.TranslateRCLI.configuration_mode(cli) is True
