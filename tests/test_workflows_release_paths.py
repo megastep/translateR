@@ -294,6 +294,34 @@ def test_release_run_updates_base_when_only_base_missing(fake_cli, fake_asc, fak
     assert base_updates
 
 
+def test_release_run_can_overwrite_existing_release_notes(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
+    fake_ui.app_id = "app1"
+    fake_ui.select_values.extend(["use", "apply"])
+    fake_ui.checkbox_values.extend([["IOS"], ["fr-FR"]])
+    fake_ui.confirm_values.extend([True, True])
+
+    locs = {
+        "data": [
+            localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+            localization_payload("fr-FR", loc_id="loc-fr", whatsNew="Old French notes"),
+        ]
+    }
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response("get_app_store_version_localizations", lambda *_a, **_k: locs)
+    fake_asc.set_response("update_app_store_version_localization", {"data": {"id": "ok"}})
+    fake_asc.set_response(
+        "get_app_store_version_localization",
+        {"data": {"attributes": {"whatsNew": "translated-French-Base notes"}}},
+    )
+
+    monkeypatch.setattr(release, "list_presets", lambda: [])
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert release.run(fake_cli) is True
+    update_calls = [c for c in fake_asc.calls if c[0] == "update_app_store_version_localization"]
+    assert any(call[2].get("localization_id") == "loc-fr" for call in update_calls)
+
+
 def test_release_run_preset_reenter_to_custom_source(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
     fake_ui.app_id = "app1"
     fake_ui.select_values.extend(["reenter", "apply"])

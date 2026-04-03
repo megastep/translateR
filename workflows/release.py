@@ -252,10 +252,13 @@ def run(cli) -> bool:
 
     # Determine empty locales
     empty_by_platform: Dict[str, List[str]] = {}
+    filled_by_platform: Dict[str, List[str]] = {}
     union_empty: List[str] = []
+    union_filled: List[str] = []
     base_missing_platforms: List[str] = []
     for plat, locale_map in per_version_locales.items():
         empties: List[str] = []
+        filled: List[str] = []
         for locale, data in locale_map.items():
             if locale == base_locale:
                 continue
@@ -264,31 +267,59 @@ def run(cli) -> bool:
                 empties.append(locale)
                 if locale not in union_empty:
                     union_empty.append(locale)
+            else:
+                filled.append(locale)
+                if locale not in union_filled:
+                    union_filled.append(locale)
         empty_by_platform[plat] = empties
+        filled_by_platform[plat] = filled
         base_here = (locale_map.get(base_locale, {}).get("whatsNew") or "").strip()
         if not base_here:
             base_missing_platforms.append(plat)
-    if not union_empty and not base_missing_platforms:
+
+    include_existing = False
+    if union_filled:
+        include_existing = ui.confirm("Also include locales that already have release notes and overwrite them?", False)
+        if include_existing is None:
+            ans = input("Also include locales that already have release notes and overwrite them? (y/N): ").strip().lower()
+            include_existing = ans in ("y", "yes")
+
+    if not union_empty and not base_missing_platforms and not include_existing:
         print_info("All selected platforms already have release notes for this version")
         return True
 
     # Select target locales
-    if union_empty:
+    candidate_locales = list(union_empty)
+    if include_existing:
+        for loc in union_filled:
+            if loc not in candidate_locales:
+                candidate_locales.append(loc)
+
+    if candidate_locales:
         if ui.available():
-            choices = [{"name": f"{loc} ({APP_STORE_LOCALES.get(loc, 'Unknown')})", "value": loc, "enabled": True} for loc in union_empty]
-            selected = ui.checkbox("Select locales to fill (Space to toggle, Enter to confirm)", choices, add_back=True)
+            choices = [
+                {
+                    "name": f"{loc} ({APP_STORE_LOCALES.get(loc, 'Unknown')})",
+                    "value": loc,
+                    "enabled": True,
+                }
+                for loc in candidate_locales
+            ]
+            prompt = "Select locales to fill or overwrite (Space to toggle, Enter to confirm)" if include_existing else "Select locales to fill (Space to toggle, Enter to confirm)"
+            selected = ui.checkbox(prompt, choices, add_back=True)
             if not selected:
-                selected = union_empty
+                selected = candidate_locales
             target_locales = selected
         else:
-            print("Locales missing release notes:")
-            for i, loc in enumerate(union_empty, 1):
+            heading = "Locales available to fill or overwrite:" if include_existing else "Locales missing release notes:"
+            print(heading)
+            for i, loc in enumerate(candidate_locales, 1):
                 print(f"{i:2d}. {loc} ({APP_STORE_LOCALES.get(loc, 'Unknown')})")
             raw = input("Enter locales (comma-separated) or 'b' to go back (blank = all): ").strip()
             if raw.lower() == 'b':
                 print_info("Cancelled")
                 return True
-            target_locales = union_empty if not raw else [s.strip() for s in raw.split(',') if s.strip() in union_empty]
+            target_locales = candidate_locales if not raw else [s.strip() for s in raw.split(',') if s.strip() in candidate_locales]
             if not target_locales:
                 print_warning("No valid locales selected")
                 return True
@@ -502,8 +533,10 @@ def run(cli) -> bool:
             continue
         plat_name = plat_label.get(plat, plat)
         locales_for_platform = empty_by_platform.get(plat, [])
+        filled_for_platform = filled_by_platform.get(plat, [])
         base_needs_update = plat in base_missing_platforms
-        total_to_update = len(locales_for_platform) + (1 if base_needs_update else 0)
+        apply_locales = [loc for loc in target_locales if loc in locales_for_platform or (include_existing and loc in filled_for_platform)]
+        total_to_update = len(apply_locales) + (1 if base_needs_update else 0)
         print_info(f"Applying to {plat_name} ({total_to_update} locale{'s' if total_to_update != 1 else ''})...")
 
         # Update base locale if empty
@@ -517,7 +550,6 @@ def run(cli) -> bool:
             except Exception as e:
                 print_warning(f"  Could not update base locale: {str(e)}")
 
-        apply_locales = [loc for loc in target_locales if loc in locales_for_platform]
         if apply_locales:
             def _apply(loc: str) -> bool:
                 asc.update_app_store_version_localization(
@@ -546,7 +578,7 @@ def run(cli) -> bool:
         for plat, locale_map in per_version_locales.items():
             if plat not in selected_versions:
                 continue
-            for loc in empty_by_platform.get(plat, []):
+            for loc in [*empty_by_platform.get(plat, []), *([loc for loc in target_locales if include_existing and loc in filled_by_platform.get(plat, [])])]:
                 data = asc.get_app_store_version_localization(locale_map[loc]["id"]) or {}
                 wn = (data.get("data", {}).get("attributes", {}).get("whatsNew") or "").strip()
                 if not wn:
