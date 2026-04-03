@@ -255,7 +255,7 @@ def test_release_run_non_tui_preset_continue_and_base_empty_custom(fake_cli, fak
     )
     monkeypatch.setattr(release, "list_presets", lambda: [preset])
     monkeypatch.setattr(release, "prompt_preset_selection", lambda *_a, **_k: (None, False))
-    answers = iter(["p", ""])
+    answers = iter(["p", "", "n"])
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: next(answers))
     fake_cli.ui = NonTUI("unused")
     assert release.run(fake_cli) is True
