@@ -1,6 +1,7 @@
 import json
 
 import release_presets
+from utils import APP_STORE_LOCALES
 
 
 def test_slugify_and_generate_preset_id():
@@ -99,3 +100,14 @@ def test_builtin_presets_include_ar_sa():
     assert builtins
     for preset in builtins:
         assert "ar-SA" in preset.translations
+
+
+def test_builtin_preset_files_include_all_supported_locales():
+    presets_dir = release_presets.REPO_ROOT / "presets"
+
+    for path in sorted(presets_dir.glob("*.json")):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        translations = raw["translations"]
+        missing = [locale for locale in APP_STORE_LOCALES if locale not in translations]
+
+        assert missing == [], f"{path.name} is missing locales: {missing}"

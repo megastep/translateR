@@ -13,6 +13,7 @@
 ## Patterns That Work
 - Stub workflow dependencies by constructing a lightweight fake `cli` object with `ui`, `asc_client`, `ai_manager`, and `config` fields.
 - Use hermetic tests with monkeypatched `requests` and temp directories for config/filesystem behavior.
+- Built-in preset JSON should use the canonical locale codes from `utils.APP_STORE_LOCALES`; when locale support adds region-qualified codes like `bn-BD` or `sl-SI`, update preset files and cover raw JSON keys with a test so bundled presets do not drift behind runtime normalization.
 - App Store Connect `POST /v1/appStoreVersionLocalizations` treats `409` as a request-entity conflict; recover by refreshing version localizations and updating an existing locale instead of retrying the same POST.
 - OpenAI translation retries must wrap every POST path, including the second pass after character-limit re-translation, or transient 429/5xx failures reappear on the retry path.
 - ASC locale normalization should treat CLI aliases case-insensitively and null-safe any `attributes` access when building localization maps.
