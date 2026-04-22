@@ -284,7 +284,7 @@ def run(cli) -> bool:
             ans = input("Also include locales that already have release notes and overwrite them? (y/N): ").strip().lower()
             include_existing = ans in ("y", "yes")
 
-    if not union_empty and not base_missing_platforms and not include_existing:
+    if not union_empty and not base_missing_platforms and not include_existing and selected_preset is None:
         print_info("All selected platforms already have release notes for this version")
         return True
 
@@ -374,14 +374,18 @@ def run(cli) -> bool:
             translations = {}
 
         # Preview
-        if target_locales:
+        preview_locales = list(target_locales)
+        if selected_preset is not None and base_locale not in preview_locales:
+            preview_locales.insert(0, base_locale)
+
+        if preview_locales:
             print_info("Preview generated release notes:")
-            for loc in target_locales:
+            for loc in preview_locales:
                 language = APP_STORE_LOCALES.get(loc, loc)
                 print("-" * 60)
                 print(f"{language} [{loc}]")
                 print("-" * 60)
-                txt = translations.get(loc, "")
+                txt = source_notes if loc == base_locale and selected_preset is not None else translations.get(loc, "")
                 print(txt)
                 if not (txt or "").strip():
                     print_warning(f"Empty translation for {language} [{loc}]")
@@ -536,13 +540,15 @@ def run(cli) -> bool:
         filled_for_platform = filled_by_platform.get(plat, [])
         base_needs_update = plat in base_missing_platforms
         apply_locales = [loc for loc in target_locales if loc in locales_for_platform or (include_existing and loc in filled_for_platform)]
-        total_to_update = len(apply_locales) + (1 if base_needs_update else 0)
+        base_empty_here = not (locale_map.get(base_locale, {}).get("whatsNew") or "").strip()
+        update_base_from_preset = selected_preset is not None and base_locale in locale_map
+        should_update_base = base_empty_here or update_base_from_preset
+        total_to_update = len(apply_locales) + (1 if should_update_base else 0)
         print_info(f"Applying to {plat_name} ({total_to_update} locale{'s' if total_to_update != 1 else ''})...")
 
         # Update base locale if empty
         success = 0
-        base_empty_here = not (locale_map.get(base_locale, {}).get("whatsNew") or "").strip()
-        if base_empty_here:
+        if should_update_base:
             try:
                 asc.update_app_store_version_localization(localization_id=locale_map[base_locale]["id"], whats_new=source_notes[:limit])
                 print_success(f"  Base locale {APP_STORE_LOCALES.get(base_locale, base_locale)} updated")

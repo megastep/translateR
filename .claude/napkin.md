@@ -21,6 +21,8 @@
 - For bulk subscription translation, use the same grouping rule as IAPs; never treat the first selected subscription as a proxy for all selected items when locale availability may differ.
 - When a workflow is in “missing/new locales only” mode, preselect the full offered locale list rather than app-locales-only defaults so Enter/confirm applies to every newly creatable locale.
 - In Release mode, preserve the default “fill missing notes only” path, but offer an explicit overwrite toggle so locales with existing `whatsNew` can be reselected and updated intentionally.
+- In Release mode, applying a preset should always update the base locale text as well, even if the base already has notes and even if no non-base locale needs changes; cover both paths with workflow tests.
+- In Release mode, preset preview should include the base locale row and show the base preset text before target-locale previews so users can verify exactly what will be written to `en-US`.
 
 ## Patterns That Don't Work
 - Assuming this worktree has a branch name; verify and create a `codex/` branch when detached.
