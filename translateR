@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+#
+# Launch TranslateR through uv so dependencies are resolved from pyproject.toml
+# and uv.lock without requiring callers to activate a virtual environment.
+
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+cd "$SCRIPT_DIR"
+exec uv run python main.py "$@"

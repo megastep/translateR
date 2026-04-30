@@ -24,7 +24,7 @@
 ## Build, Test, and Development Commands
 
 - Install/sync deps: `uv sync`
-- Run locally: `uv run python main.py` (first run creates `config/` and prompts for keys)
+- Run locally: `./translateR` (first run creates `config/` and prompts for keys)
 - Optional tests: `uv run pytest -q` (if `pytest` and `tests/` are added)
 
 ## App Store Connect API Skill

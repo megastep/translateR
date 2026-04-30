@@ -14,7 +14,7 @@ TranslateR is an AI-powered App Store Connect localization automation tool. It c
 uv sync
 
 # Run the tool (creates config/ on first run)
-uv run python main.py
+./translateR
 ```
 
 ### First Run Configuration
@@ -27,7 +27,7 @@ These are saved to `config/api_keys.json` (gitignored).
 ### Running the Tool
 ```bash
 # Interactive CLI with 12 workflows
-uv run python main.py
+./translateR
 ```
 
 ### Testing

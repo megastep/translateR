@@ -38,7 +38,7 @@ Install [uv](https://docs.astral.sh/uv/) first if it is not already available.
 2. **Setup** (one-time)
 
    ```bash
-   uv run python main.py
+   ./translateR
    ```
 
    - Add your App Store Connect API key (.p8 file)
@@ -47,7 +47,7 @@ Install [uv](https://docs.astral.sh/uv/) first if it is not already available.
 3. **Use**
 
    ```bash
-   uv run python main.py
+   ./translateR
    ```
 
    Choose your workflow and follow prompts.
@@ -215,7 +215,7 @@ By default the script resolves the latest App Store version for the app ID you p
 ## Example Workflow
 
 ```bash
-$ uv run python main.py
+$ ./translateR
 
 TranslateR - App Store Localization Tool
 1. 🌐 Translation Mode
