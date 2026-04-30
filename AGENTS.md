@@ -23,10 +23,9 @@
 
 ## Build, Test, and Development Commands
 
-- Setup venv: `python3 -m venv .venv && source .venv/bin/activate`
-- Install deps: `pip install -r requirements.txt`
-- Run locally: `python3 main.py` (first run creates `config/` and prompts for keys)
-- Optional tests: `pytest -q` (if `pytest` and `tests/` are added)
+- Install/sync deps: `uv sync`
+- Run locally: `uv run python main.py` (first run creates `config/` and prompts for keys)
+- Optional tests: `uv run pytest -q` (if `pytest` and `tests/` are added)
 
 ## App Store Connect API Skill
 
@@ -103,7 +102,7 @@
 - Avoid real API calls; stub `AppStoreConnectClient` and provider classes.
 - Aim for coverage of limits (name/keywords length) and error paths.
 - Add or update tests for every new or changed behavior in production code; do not ship code changes without corresponding test coverage.
-- Before creating a commit, run the relevant test suite locally (at minimum `pytest -q`) and ensure it passes.
+- Before creating a commit, run the relevant test suite locally (at minimum `uv run pytest -q`) and ensure it passes.
 
 ## Commit & Pull Request Guidelines
 

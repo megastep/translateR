@@ -25,18 +25,20 @@ TranslateR connects to your App Store Connect account and automatically translat
 
 ## Quick Start
 
+Install [uv](https://docs.astral.sh/uv/) first if it is not already available.
+
 1. **Install**
 
    ```bash
    git clone https://github.com/emreertunc/translater.git
    cd translater
-   pip install -r requirements.txt
+   uv sync
    ```
 
 2. **Setup** (one-time)
 
    ```bash
-   python3 main.py
+   uv run python main.py
    ```
 
    - Add your App Store Connect API key (.p8 file)
@@ -45,7 +47,7 @@ TranslateR connects to your App Store Connect account and automatically translat
 3. **Use**
 
    ```bash
-   python3 main.py
+   uv run python main.py
    ```
 
    Choose your workflow and follow prompts.
@@ -213,7 +215,7 @@ By default the script resolves the latest App Store version for the app ID you p
 ## Example Workflow
 
 ```bash
-$ python3 main.py
+$ uv run python main.py
 
 TranslateR - App Store Localization Tool
 1. 🌐 Translation Mode

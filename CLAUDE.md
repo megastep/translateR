@@ -10,14 +10,11 @@ TranslateR is an AI-powered App Store Connect localization automation tool. It c
 
 ### Setup and Installation
 ```bash
-# Create virtual environment (recommended)
-python3 -m venv .venv && source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Install/sync dependencies
+uv sync
 
 # Run the tool (creates config/ on first run)
-python3 main.py
+uv run python main.py
 ```
 
 ### First Run Configuration
@@ -30,11 +27,17 @@ These are saved to `config/api_keys.json` (gitignored).
 ### Running the Tool
 ```bash
 # Interactive CLI with 12 workflows
-python3 main.py
+uv run python main.py
 ```
 
 ### Testing
-No automated tests are currently implemented. Test manually with non-production apps first. Use the "Export Localizations" workflow to back up before making changes.
+Run the automated test suite through uv:
+
+```bash
+uv run pytest -q
+```
+
+Test App Store Connect changes manually with non-production apps first. Use the "Export Localizations" workflow to back up before making changes.
 
 ## Architecture Overview
 
