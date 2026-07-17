@@ -10,6 +10,7 @@ from __future__ import annotations
 import textwrap
 from typing import Dict, List, Optional, Tuple
 
+from translation_validation import translate_with_validation
 from release_presets import (
     ReleaseNotePreset,
     list_presets,
@@ -104,17 +105,15 @@ def _create_preset(cli) -> None:
 
     def _task(locale: str) -> str:
         language = APP_STORE_LOCALES.get(locale, locale)
-        txt = provider.translate(
-            text=english_text,
-            target_language=language,
+        txt = translate_with_validation(
+            provider,
+            english_text,
+            language,
             max_length=limit,
-            is_keywords=False,
             seed=seed,
             refinement=default_refine,
+            field_label="What's New preset",
         )
-        txt = (txt or "").strip()
-        if len(txt) > limit:
-            txt = txt[:limit]
         return txt
 
     translated, errors = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=1.0)

@@ -4,6 +4,7 @@ from typing import Dict, List
 
 import requests
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES,
     parallel_map_locales,
@@ -25,17 +26,15 @@ def generate_promotional_translations(
 
     def _task(loc: str) -> str:
         language = APP_STORE_LOCALES.get(loc, loc)
-        txt = provider.translate(
-            text=source_text,
-            target_language=language,
+        txt = translate_with_validation(
+            provider,
+            source_text,
+            language,
             max_length=limit,
-            is_keywords=False,
             seed=seed,
             refinement=refine_phrase,
+            field_label="Promotional text",
         )
-        txt = (txt or "").strip()
-        if len(txt) > limit:
-            txt = txt[:limit]
         return txt
 
     translations, _errs = parallel_map_locales(

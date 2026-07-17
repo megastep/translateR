@@ -190,8 +190,11 @@ def test_subscription_conflict_fallback_paths(monkeypatch):
         return {"data": []}
 
     monkeypatch.setattr(client, "_request", sub_request)
-    out = client.create_subscription_localization("sub1", "fr-FR", "Nom", "Desc")
-    assert out == {"en-US": "loc-en"}
+    try:
+        client.create_subscription_localization("sub1", "fr-FR", "Nom", "Desc")
+        assert False, "expected unmatched 409 to be preserved"
+    except requests.exceptions.HTTPError as error:
+        assert error.response.status_code == 409
 
     def group_request(method, endpoint, params=None, data=None, max_retries=3):
         if method == "POST" and endpoint == "v1/subscriptionGroupLocalizations":

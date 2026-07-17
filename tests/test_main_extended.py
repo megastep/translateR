@@ -153,7 +153,7 @@ def test_translate_app_info_updates_and_creates_localizations(monkeypatch):
             self.created.append((app_info_id, locale, kwargs))
 
     class Provider:
-        def translate(self, text, target_language, max_length=None, seed=None):
+        def translate(self, text, target_language, max_length=None, seed=None, refinement=None):
             return f"{target_language}-{text}"[:max_length]
 
     asc = ASC()

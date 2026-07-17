@@ -5,6 +5,7 @@ Full Setup Mode: translate missing languages across selected platforms.
 from typing import Dict
 import time
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES, detect_base_language, get_field_limit, truncate_keywords,
     print_info, print_warning, print_success, print_error, format_progress,
@@ -110,14 +111,30 @@ def run(cli) -> bool:
         language_name = APP_STORE_LOCALES.get(loc, loc)
         translated = {}
         if base_attrs.get("description"):
-            translated["description"] = provider.translate(base_attrs["description"], language_name, max_length=get_field_limit("description"), seed=seed, refinement=refine_phrase)
+            translated["description"] = translate_with_validation(
+                provider, base_attrs["description"], language_name,
+                max_length=get_field_limit("description"), seed=seed, refinement=refine_phrase,
+                field_label="App description",
+            )
         if base_attrs.get("keywords"):
-            kw = provider.translate(base_attrs["keywords"], language_name, max_length=get_field_limit("keywords"), is_keywords=True, seed=seed, refinement=refine_phrase)
+            kw = translate_with_validation(
+                provider, base_attrs["keywords"], language_name,
+                max_length=get_field_limit("keywords"), is_keywords=True, seed=seed,
+                refinement=refine_phrase, field_label="App keywords", single_line=True,
+            )
             translated["keywords"] = truncate_keywords(kw)
         if base_attrs.get("promotionalText"):
-            translated["promotionalText"] = provider.translate(base_attrs["promotionalText"], language_name, max_length=get_field_limit("promotional_text"), seed=seed, refinement=refine_phrase)
+            translated["promotionalText"] = translate_with_validation(
+                provider, base_attrs["promotionalText"], language_name,
+                max_length=get_field_limit("promotional_text"), seed=seed, refinement=refine_phrase,
+                field_label="Promotional text",
+            )
         if base_attrs.get("whatsNew"):
-            translated["whatsNew"] = provider.translate(base_attrs["whatsNew"], language_name, max_length=get_field_limit("whats_new"), seed=seed, refinement=refine_phrase)
+            translated["whatsNew"] = translate_with_validation(
+                provider, base_attrs["whatsNew"], language_name,
+                max_length=get_field_limit("whats_new"), seed=seed, refinement=refine_phrase,
+                field_label="What's New",
+            )
         time.sleep(1)
         return translated
 

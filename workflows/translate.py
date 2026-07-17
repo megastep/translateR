@@ -5,6 +5,7 @@ Translation Mode workflow with multi-platform handling.
 from typing import Dict
 import time
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES,
     get_field_limit,
@@ -166,14 +167,30 @@ def run(cli) -> bool:
         language_name = APP_STORE_LOCALES.get(loc, loc)
         translated = {}
         if base_data.get("description"):
-            translated["description"] = provider.translate(base_data["description"], language_name, max_length=get_field_limit("description"), seed=seed, refinement=refine_phrase)
+            translated["description"] = translate_with_validation(
+                provider, base_data["description"], language_name,
+                max_length=get_field_limit("description"), seed=seed, refinement=refine_phrase,
+                field_label="App description",
+            )
         if base_data.get("keywords"):
-            kw = provider.translate(base_data["keywords"], language_name, max_length=get_field_limit("keywords"), is_keywords=True, seed=seed, refinement=refine_phrase)
+            kw = translate_with_validation(
+                provider, base_data["keywords"], language_name,
+                max_length=get_field_limit("keywords"), is_keywords=True, seed=seed,
+                refinement=refine_phrase, field_label="App keywords", single_line=True,
+            )
             translated["keywords"] = truncate_keywords(kw)
         if base_data.get("promotionalText"):
-            translated["promotionalText"] = provider.translate(base_data["promotionalText"], language_name, max_length=get_field_limit("promotional_text"), seed=seed, refinement=refine_phrase)
+            translated["promotionalText"] = translate_with_validation(
+                provider, base_data["promotionalText"], language_name,
+                max_length=get_field_limit("promotional_text"), seed=seed, refinement=refine_phrase,
+                field_label="Promotional text",
+            )
         if base_data.get("whatsNew"):
-            translated["whatsNew"] = provider.translate(base_data["whatsNew"], language_name, max_length=get_field_limit("whats_new"), seed=seed, refinement=refine_phrase)
+            translated["whatsNew"] = translate_with_validation(
+                provider, base_data["whatsNew"], language_name,
+                max_length=get_field_limit("whats_new"), seed=seed, refinement=refine_phrase,
+                field_label="What's New",
+            )
         if base_data.get("marketingUrl"):
             translated["marketingUrl"] = base_data["marketingUrl"]
         if base_data.get("supportUrl"):

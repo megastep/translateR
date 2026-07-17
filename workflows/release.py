@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import sys
 import textwrap
 
+from translation_validation import translate_with_validation
 from release_presets import list_presets, ReleaseNotePreset
 
 from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source, build_refinement_template, parse_refinement_template
@@ -356,17 +357,15 @@ def run(cli) -> bool:
 
             def _task(loc: str) -> str:
                 language = APP_STORE_LOCALES.get(loc, loc)
-                txt = provider.translate(
-                    text=source_notes,
-                    target_language=language,
+                txt = translate_with_validation(
+                    provider,
+                    source_notes,
+                    language,
                     max_length=limit,
-                    is_keywords=False,
                     seed=seed,
                     refinement=refine_phrase,
+                    field_label="What's New",
                 )
-                txt = (txt or "").strip()
-                if len(txt) > limit:
-                    txt = txt[:limit]
                 return txt
 
             translations, _errs = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=1.0)

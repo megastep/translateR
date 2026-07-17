@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import requests
 from typing import Dict, List, Optional, Tuple
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES,
     detect_base_language,
@@ -457,26 +458,16 @@ def _translate_required(
     field_label: str,
     max_length: Optional[int] = None,
 ) -> str:
-    translated = provider.translate(
+    return translate_with_validation(
+        provider,
         text,
         language_name,
         max_length=max_length,
         seed=seed,
         refinement=refine_phrase,
-    ) or ""
-    if translated.strip():
-        return translated.strip()
-    stronger = (refine_phrase or "").strip()
-    extra = f" Do not return an empty string. Return ONLY the translated text for the {field_label}."
-    stronger = (stronger + extra).strip() if stronger else extra.strip()
-    translated = provider.translate(
-        text,
-        language_name,
-        max_length=max_length,
-        seed=seed,
-        refinement=stronger,
-    ) or ""
-    return translated.strip()
+        field_label=f"Game Center {field_label}",
+        single_line=True,
+    )
 
 
 def run(cli) -> bool:
@@ -921,29 +912,22 @@ def run(cli) -> bool:
                         "name",
                         max_length=name_limit,
                     ),
-                    "description": provider.translate(
-                        base_desc,
-                        language_name,
-                        max_length=desc_limit,
-                        seed=seed,
-                        refinement=refine_phrase,
-                    ).strip()
+                    "description": _translate_required(
+                        provider, base_desc, language_name, refine_phrase, seed,
+                        "leaderboard description", max_length=desc_limit,
+                    )
                     if base_desc
                     else "",
-                    "formatterSuffix": provider.translate(
-                        base_suffix,
-                        language_name,
-                        seed=seed,
-                        refinement=refine_phrase,
-                    ).strip()
+                    "formatterSuffix": _translate_required(
+                        provider, base_suffix, language_name, refine_phrase, seed,
+                        "formatter suffix",
+                    )
                     if base_suffix
                     else "",
-                    "formatterSuffixSingular": provider.translate(
-                        base_suffix_singular,
-                        language_name,
-                        seed=seed,
-                        refinement=refine_phrase,
-                    ).strip()
+                    "formatterSuffixSingular": _translate_required(
+                        provider, base_suffix_singular, language_name, refine_phrase, seed,
+                        "singular formatter suffix",
+                    )
                     if base_suffix_singular
                     else "",
                 }
@@ -1081,13 +1065,10 @@ def run(cli) -> bool:
                         "name",
                         max_length=name_limit,
                     ),
-                    "description": provider.translate(
-                        base_desc,
-                        language_name,
-                        max_length=desc_limit,
-                        seed=seed,
-                        refinement=refine_phrase,
-                    ).strip()
+                    "description": _translate_required(
+                        provider, base_desc, language_name, refine_phrase, seed,
+                        f"{kind} description", max_length=desc_limit,
+                    )
                     if base_desc
                     else "",
                 }

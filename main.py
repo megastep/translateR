@@ -38,6 +38,7 @@ from workflows.app_events_translate import run as app_events_translate_run
 from config import ConfigManager
 from app_store_client import AppStoreConnectClient
 from ai_providers import AIProviderManager, AnthropicProvider, OpenAIProvider, GoogleGeminiProvider
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES,
     detect_base_language,
@@ -440,27 +441,29 @@ class TranslateRCLI:
                     # Translate name
                     if base_name:
                         print(f"  • Translating app name...")
-                        translated_name = provider.translate(
+                        translated_name = translate_with_validation(
+                            provider,
                             base_name,
                             language_name,
                             max_length=30,
-                            seed=self.session_seed
+                            seed=self.session_seed,
+                            field_label="App name",
+                            single_line=True,
                         )
-                        if len(translated_name) > 30:
-                            translated_name = translated_name[:30]
                         translated_data["name"] = translated_name
                     
                     # Translate subtitle
                     if base_subtitle:
                         print(f"  • Translating subtitle...")
-                        translated_subtitle = provider.translate(
+                        translated_subtitle = translate_with_validation(
+                            provider,
                             base_subtitle,
                             language_name,
                             max_length=30,
-                            seed=self.session_seed
+                            seed=self.session_seed,
+                            field_label="App subtitle",
+                            single_line=True,
                         )
-                        if len(translated_subtitle) > 30:
-                            translated_subtitle = translated_subtitle[:30]
                         translated_data["subtitle"] = translated_subtitle
                     
                     # Create or update app info localization

@@ -8,6 +8,7 @@ configured AI provider.
 import time
 from typing import Dict, List, Optional, Tuple
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES,
     get_field_limit,
@@ -252,17 +253,19 @@ def run(cli) -> bool:
 
         def _task(loc: str):
             language_name = APP_STORE_LOCALES.get(loc, loc)
-            translated = {}
-            # Name is required; retry once if the model returns empty.
-            translated_name = provider.translate(base_name, language_name, max_length=name_limit, seed=seed, refinement=refine_phrase) or ""
-            if not translated_name.strip():
-                stronger = (refine_phrase or "").strip()
-                extra = " Do not return an empty string. Return ONLY the translated text."
-                stronger = (stronger + extra).strip() if stronger else extra.strip()
-                translated_name = provider.translate(base_name, language_name, max_length=name_limit, seed=seed, refinement=stronger) or ""
-            translated["name"] = translated_name.strip()
+            translated = {
+                "name": translate_with_validation(
+                    provider, base_name, language_name, max_length=name_limit, seed=seed,
+                    refinement=refine_phrase, field_label="In-app purchase display name",
+                    single_line=True,
+                )
+            }
             if base_description:
-                translated["description"] = provider.translate(base_description, language_name, max_length=desc_limit, seed=seed, refinement=refine_phrase)
+                translated["description"] = translate_with_validation(
+                    provider, base_description, language_name, max_length=desc_limit, seed=seed,
+                    refinement=refine_phrase, field_label="In-app purchase description",
+                    single_line=True,
+                )
             time.sleep(1)
             return translated
 

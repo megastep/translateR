@@ -9,6 +9,7 @@ import time
 import os
 from typing import Dict, List, Optional
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES,
     detect_base_language,
@@ -92,30 +93,17 @@ def _translate_with_min_len(
     min_len: int,
     field_label: str,
 ) -> str:
-    """Translate and ensure at least min_len characters, retrying once with stronger guidance."""
-    base_guidance = (
-        f"Context: App Store in-app event localization field '{field_label}'. "
-        f"Return ONLY the translated text (no quotes, no labels, no markdown, no explanations). "
-        f"Preserve meaning, marketing tone, and formatting (including newlines). "
-        f"Keep app/product names, brand names, URLs, numbers, and placeholders unchanged (e.g., {{var}}, %d, %@). "
-        f"Do not output an empty string; minimum length is {min_len} characters."
+    """Translate through the shared length and output-validation system."""
+    return translate_with_validation(
+        provider,
+        source_text,
+        language_name,
+        max_length=max_length,
+        seed=seed,
+        refinement=refinement,
+        min_length=min_len,
+        field_label=f"In-app event {field_label}",
     )
-    if max_length:
-        base_guidance += f" Maximum length is {max_length} characters."
-    merged_refinement = (refinement or "").strip()
-    merged_refinement = (merged_refinement + " " + base_guidance).strip() if merged_refinement else base_guidance
-
-    translated = provider.translate(source_text, language_name, max_length=max_length, seed=seed, refinement=merged_refinement)
-    if _ensure_min_len(translated, min_len):
-        return translated.strip()
-
-    stronger = merged_refinement + (
-        f" Retry: your previous output was too short/empty. "
-        f"Translate fully and ensure at least {min_len} characters."
-    )
-    _debug(f"retry translation field={field_label} locale={language_name} (min_len={min_len})")
-    translated = provider.translate(source_text, language_name, max_length=max_length, seed=seed, refinement=stronger)
-    return translated.strip()
 
 
 def _prompt_line(ui, message: str, default: str = "") -> str:

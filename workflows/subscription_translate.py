@@ -4,9 +4,11 @@ Subscription localization translation workflow.
 Translates subscription name and description to missing locales.
 """
 
+import json
 import time
 from typing import Dict, List, Tuple
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES,
     get_field_limit,
@@ -20,6 +22,131 @@ from utils import (
     format_progress,
 )
 from workflows.helpers import pick_provider, choose_target_locales, get_app_locales, pick_locale_scope
+
+
+SUBSCRIPTION_LOCALIZATION_LOCKED_STATES = {
+    "WAITING_FOR_REVIEW",
+    "IN_REVIEW",
+    "PENDING_BINARY_APPROVAL",
+}
+
+
+def _subscription_state(asc, subscription: Dict) -> str:
+    """Return the product state, fetching the single resource when list data omitted it."""
+    state = (subscription.get("attributes") or {}).get("state")
+    if state:
+        return state
+    subscription_id = subscription.get("id")
+    if not subscription_id:
+        return ""
+    try:
+        response = asc.get_subscription(subscription_id)
+        return (response.get("data", {}).get("attributes") or {}).get("state") or ""
+    except Exception:
+        return ""
+
+
+def _is_localization_validation_error(error: Exception) -> bool:
+    """Return whether an ASC error can plausibly be fixed by new field values."""
+    if isinstance(error, ValueError):
+        return True
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    if response is not None and status in (400, 409, 422):
+        try:
+            body = response.json()
+        except Exception:
+            body = None
+        errors = body.get("errors", []) if isinstance(body, dict) else []
+        if errors:
+            error_text = json.dumps(errors, ensure_ascii=False).lower()
+            field_markers = (
+                "/data/attributes/name",
+                "/data/attributes/description",
+                "/data/attributes/customappname",
+                "character",
+                "too long",
+                "maximum length",
+                "invalid attribute",
+            )
+            return any(marker in error_text for marker in field_markers)
+        return True
+    message = str(error).upper()
+    return any(marker in message for marker in ("400", "409", "422", "ENTITY_ERROR", "INVALID"))
+
+
+def _asc_error_summary(error: Exception) -> str:
+    """Extract actionable JSON:API error details from an ASC exception."""
+    response = getattr(error, "response", None)
+    if response is None:
+        return str(error)
+    status = getattr(response, "status_code", None)
+    try:
+        body = response.json()
+    except Exception:
+        body = getattr(response, "text", "") or ""
+    details = []
+    if isinstance(body, dict):
+        for item in body.get("errors", []) or []:
+            if not isinstance(item, dict):
+                continue
+            source = item.get("source") or {}
+            pointer = source.get("pointer") if isinstance(source, dict) else None
+            parts = [item.get("code"), item.get("title"), item.get("detail"), pointer]
+            detail = " | ".join(str(part) for part in parts if part)
+            if detail:
+                details.append(detail)
+    if not details and body:
+        details.append(json.dumps(body, ensure_ascii=False)[:800] if isinstance(body, dict) else str(body)[:800])
+    prefix = f"ASC {status}" if status else "ASC error"
+    return f"{prefix}: {'; '.join(details)}" if details else f"{prefix}: {error}"
+
+
+def _require_saved_resource(response, desired: Dict[str, str], *, group_scope: bool) -> str:
+    """Require the successful JSON:API resource ASC promises for POST/PATCH."""
+    resource = response.get("data") if isinstance(response, dict) else None
+    if not isinstance(resource, dict) or not resource.get("id"):
+        raise RuntimeError("ASC returned no saved localization resource")
+    attrs = resource.get("attributes")
+    if isinstance(attrs, dict):
+        description_field = "customAppName" if group_scope else "description"
+        if attrs.get("name") is not None and attrs.get("name") != desired.get("name"):
+            raise RuntimeError("ASC response did not preserve the submitted display name")
+        desired_description = desired.get(description_field)
+        if (
+            desired_description is not None
+            and attrs.get(description_field) is not None
+            and attrs.get(description_field) != desired_description
+        ):
+            raise RuntimeError("ASC response did not preserve the submitted description")
+    return resource["id"]
+
+
+def _translate_locale_fields(provider, base_name: str, base_desc: str,
+                             language_name: str, name_limit: int, desc_limit: int,
+                             seed, refinement: str, *, group_scope: bool,
+                             submission_retry: bool = False) -> Dict[str, str]:
+    translated = {
+        "name": translate_with_validation(
+            provider, base_name, language_name, max_length=name_limit, seed=seed,
+            refinement=refinement,
+            field_label="Subscription display name",
+            single_line=True,
+            forbid_emoji=True,
+            submission_retry=submission_retry,
+        )
+    }
+    if base_desc:
+        field = "customAppName" if group_scope else "description"
+        translated[field] = translate_with_validation(
+            provider, base_desc, language_name, max_length=desc_limit, seed=seed,
+            refinement=refinement,
+            field_label=("Subscription group app name" if group_scope else "Subscription description"),
+            single_line=True,
+            forbid_emoji=True,
+            submission_retry=submission_retry,
+        )
+    return translated
 
 
 def _build_subscription_locale_plan(base_locale: str, existing_locale_ids: Dict[str, str]) -> Tuple[Dict[str, Dict[str, str]], Dict[str, List[str]]]:
@@ -186,12 +313,36 @@ def run(cli) -> bool:
             product_id = attrs.get("productId", "")
             label = f"{sub_name} [{product_id}]" if product_id else sub_name
 
+            product_state = _subscription_state(asc, sub)
+            if product_state in SUBSCRIPTION_LOCALIZATION_LOCKED_STATES:
+                print()
+                print_info(f"({idx}/{len(subs)}) Processing {label}")
+                print_warning(
+                    f"Subscription state is {product_state}; ASC locks localization changes "
+                    f"while review is pending. Skipping before translation."
+                )
+                continue
+
             loc_resp = asc.get_subscription_localizations(sub.get("id"))
             locs = loc_resp.get("data", []) if isinstance(loc_resp, dict) else []
             if not locs:
                 print()
                 print_info(f"({idx}/{len(subs)}) Processing {label}")
                 print_warning("No existing localizations; skipping")
+                continue
+
+            pending_localization_states = {
+                (loc.get("attributes") or {}).get("state")
+                for loc in locs
+            } & SUBSCRIPTION_LOCALIZATION_LOCKED_STATES
+            if pending_localization_states:
+                print()
+                print_info(f"({idx}/{len(subs)}) Processing {label}")
+                states = ", ".join(sorted(pending_localization_states))
+                print_warning(
+                    f"Existing subscription localization state is {states}; ASC locks new or "
+                    f"changed localizations until review completes. Skipping before translation."
+                )
                 continue
 
             base_locale = detect_base_language(locs)
@@ -418,15 +569,25 @@ def run(cli) -> bool:
 
         def _task(loc: str):
             language_name = APP_STORE_LOCALES.get(loc, loc)
-            translated = {}
-            translated["name"] = provider.translate(base_name, language_name, max_length=name_limit, seed=seed, refinement=refine_phrase)
-            if base_desc:
-                field = "description" if scope == "sub" else "customAppName"
-                translated[field] = provider.translate(base_desc, language_name, max_length=desc_limit, seed=seed, refinement=refine_phrase)
+            translated = _translate_locale_fields(
+                provider,
+                base_name,
+                base_desc,
+                language_name,
+                name_limit,
+                desc_limit,
+                seed,
+                refine_phrase,
+                group_scope=scope != "sub",
+            )
             time.sleep(1)
             return translated
 
         results, errs = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=0.0)
+        for failed_locale, error in errs.items():
+            print_error(
+                f"Failed to translate {APP_STORE_LOCALES.get(failed_locale, failed_locale)}: {error}"
+            )
 
         success = 0
         total_targets = len(target_locales)
@@ -438,19 +599,6 @@ def run(cli) -> bool:
             last_progress_len = len(line)
         except Exception:
             pass
-        def _refresh_locale_ids() -> Dict[str, str]:
-            try:
-                refreshed = asc.get_subscription_localizations(sub.get("id")) if scope == "sub" else asc.get_subscription_group_localizations(sub.get("id"))
-                refreshed_map = {l.get("attributes", {}).get("locale"): l.get("id") for l in refreshed.get("data", []) if l.get("id")}
-                refreshed_attrs = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in refreshed.get("data", []) if l.get("attributes")}
-                existing_locale_ids.clear()
-                existing_locale_ids.update(refreshed_map)
-                existing_locale_attrs.clear()
-                existing_locale_attrs.update(refreshed_attrs)
-                return refreshed_map
-            except Exception:
-                return existing_locale_ids
-
         def _unique_root_match(loc_map: Dict[str, str], locale_code: str) -> str:
             # Never map region/script locales like en-AU to a different variant like en-US.
             # Only allow root matching when the requested locale has no region/script (e.g., fi vs fi-FI).
@@ -487,19 +635,21 @@ def run(cli) -> bool:
             try:
                 if scope == "sub":
                     if loc_id:
-                        asc.update_subscription_localization(loc_id, data.get("name"), data.get("description"))
+                        saved = asc.update_subscription_localization(loc_id, data.get("name"), data.get("description"))
                     else:
                         time.sleep(0.25)
-                        asc.create_subscription_localization(sub.get("id"), loc, data.get("name", ""), data.get("description"))
-                        _refresh_locale_ids()
+                        saved = asc.create_subscription_localization(sub.get("id"), loc, data.get("name", ""), data.get("description"))
+                    saved_id = _require_saved_resource(saved, data, group_scope=False)
+                    existing_locale_ids[loc] = saved_id
                     existing_locale_attrs[loc] = {"name": data.get("name"), "description": data.get("description")}
                 else:
                     if loc_id:
-                        asc.update_subscription_group_localization(loc_id, data.get("name"), data.get("customAppName"))
+                        saved = asc.update_subscription_group_localization(loc_id, data.get("name"), data.get("customAppName"))
                     else:
                         time.sleep(0.25)
-                        asc.create_subscription_group_localization(sub.get("id"), loc, data.get("name", ""), data.get("customAppName"))
-                        _refresh_locale_ids()
+                        saved = asc.create_subscription_group_localization(sub.get("id"), loc, data.get("name", ""), data.get("customAppName"))
+                    saved_id = _require_saved_resource(saved, data, group_scope=True)
+                    existing_locale_ids[loc] = saved_id
                     existing_locale_attrs[loc] = {"name": data.get("name"), "customAppName": data.get("customAppName")}
                 success += 1
                 completed += 1
@@ -511,77 +661,64 @@ def run(cli) -> bool:
                 except Exception:
                     pass
             except Exception as e:
-                if "409" in str(e):
-                    try:
-                        refreshed = asc.get_subscription_localizations(sub.get("id")) if scope == "sub" else asc.get_subscription_group_localizations(sub.get("id"))
-                        refreshed_map = {l.get("attributes", {}).get("locale"): l.get("id") for l in refreshed.get("data", []) if l.get("id")}
-                        refreshed_attrs = {l.get("attributes", {}).get("locale"): (l.get("attributes", {}) or {}) for l in refreshed.get("data", []) if l.get("attributes")}
-                        loc_obj = next((l for l in refreshed.get("data", []) if l.get("attributes", {}).get("locale") == loc), None)
-                        if not loc_obj:
-                            # Try unique language-root match only when unambiguous (avoid en-US/en-GB conflicts)
-                            if "-" not in (loc or ""):
-                                root = loc.split("-")[0].lower()
-                                candidates = [
-                                    l for l in refreshed.get("data", [])
-                                    if l.get("attributes", {}).get("locale", "").split("-")[0].lower() == root
-                                ]
-                                loc_obj = candidates[0] if len(candidates) == 1 else None
-                        if loc_obj:
-                            attrs = loc_obj.get("attributes", {})
-                            desired_name = data.get("name")
-                            desired_desc = data.get("description") if scope == "sub" else data.get("customAppName")
-                            current_desc = attrs.get("description") if scope == "sub" else attrs.get("customAppName")
-                            if attrs.get("name") == desired_name and (desired_desc is None or current_desc == desired_desc):
-                                success += 1
-                                existing_locale_ids[loc] = loc_obj.get("id") or existing_locale_ids.get(loc, "")
-                                if loc_obj.get("attributes", {}).get("locale"):
-                                    existing_locale_attrs[loc_obj.get("attributes", {}).get("locale")] = attrs
-                                continue
-                        new_id = refreshed_map.get(loc) or _unique_root_match(refreshed_map, loc)
-                        if new_id:
-                            if scope == "sub":
-                                asc.update_subscription_localization(new_id, data.get("name"), data.get("description"))
-                            else:
-                                asc.update_subscription_group_localization(new_id, data.get("name"), data.get("customAppName"))
-                            success += 1
-                            existing_locale_ids[loc] = new_id
-                            if refreshed_attrs.get(loc):
-                                existing_locale_attrs[loc] = refreshed_attrs.get(loc)
-                            completed += 1
-                            try:
-                                line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
-                                pad = max(0, last_progress_len - len(line))
-                                print("\r" + line + (" " * pad), end="")
-                                last_progress_len = len(line)
-                            except Exception:
-                                pass
-                            continue
-                        # If we still don't have an ID, check direct fetch by loc_id when we had one and see if it already matches
-                        if loc_id:
-                            try:
-                                fetched = asc.get_subscription_localization(loc_id) if scope == "sub" else asc.get_subscription_group_localization(loc_id)
-                                f_attrs = fetched.get("data", {}).get("attributes", {}) if isinstance(fetched, dict) else {}
-                                desired_name = data.get("name")
-                                desired_desc = data.get("description") if scope == "sub" else data.get("customAppName")
-                                current_desc = f_attrs.get("description") if scope == "sub" else f_attrs.get("customAppName")
-                                if f_attrs.get("name") == desired_name and (desired_desc is None or current_desc == desired_desc):
-                                    success += 1
-                                    existing_locale_attrs[loc] = f_attrs
-                                    completed += 1
-                                    try:
-                                        line = format_progress(completed, total_targets, f"Saved {APP_STORE_LOCALES.get(loc, loc)}")
-                                        pad = max(0, last_progress_len - len(line))
-                                        print("\r" + line + (" " * pad), end="")
-                                        last_progress_len = len(line)
-                                    except Exception:
-                                        pass
-                                    continue
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
                 language_name = APP_STORE_LOCALES.get(loc, loc)
-                print_error(f"  ❌ Failed to save {language_name}: {e}")
+                if not _is_localization_validation_error(e):
+                    print_error(f"Failed to save {language_name}: {_asc_error_summary(e)}")
+                    continue
+                original_error = _asc_error_summary(e)
+                print_warning(
+                    f"ASC rejected {language_name}; forcing one fresh translation ({original_error})"
+                )
+                try:
+                    retry_seed = seed + 1 if isinstance(seed, int) else seed
+                    retry_data = _translate_locale_fields(
+                        provider,
+                        base_name,
+                        base_desc,
+                        language_name,
+                        name_limit,
+                        desc_limit,
+                        retry_seed,
+                        refine_phrase,
+                        group_scope=scope != "sub",
+                        submission_retry=True,
+                    )
+                    if scope == "sub":
+                        if loc_id:
+                            saved = asc.update_subscription_localization(
+                                loc_id, retry_data.get("name"), retry_data.get("description")
+                            )
+                        else:
+                            saved = asc.create_subscription_localization(
+                                sub.get("id"), loc, retry_data.get("name", ""), retry_data.get("description")
+                            )
+                        existing_locale_attrs[loc] = {
+                            "name": retry_data.get("name"),
+                            "description": retry_data.get("description"),
+                        }
+                    else:
+                        if loc_id:
+                            saved = asc.update_subscription_group_localization(
+                                loc_id, retry_data.get("name"), retry_data.get("customAppName")
+                            )
+                        else:
+                            saved = asc.create_subscription_group_localization(
+                                sub.get("id"), loc, retry_data.get("name", ""), retry_data.get("customAppName")
+                            )
+                        existing_locale_attrs[loc] = {
+                            "name": retry_data.get("name"),
+                            "customAppName": retry_data.get("customAppName"),
+                        }
+                    saved_id = _require_saved_resource(saved, retry_data, group_scope=scope != "sub")
+                    existing_locale_ids[loc] = saved_id
+                    success += 1
+                    completed += 1
+                except Exception as retry_error:
+                    print_error(
+                        f"Failed to save {language_name} after forced retranslation: "
+                        f"{_asc_error_summary(retry_error)} "
+                        f"(original error: {original_error})"
+                    )
 
         try:
             print("\r" + (" " * last_progress_len) + "\r", end="")
