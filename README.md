@@ -190,7 +190,7 @@ By default the script resolves the latest App Store version for the app ID you p
 - Enforces ASC's 30-character name and 45-character description limits with a safety margin and progressively stricter generation retries
 - Allows standard target-language abbreviations when they naturally preserve meaning and help meet a field limit
 - Validates generated text before submission and requires ASC to return a saved localization resource
-- If ASC rejects a localized field, forces up to three fresh translations; non-text conflicts report ASC's structured error details instead of being mislabeled as translation failures
+- If ASC rejects a localized field, forces one fresh translation through the shared multi-attempt validator; non-text conflicts report ASC's structured error details instead of being mislabeled as translation failures
 - Skips subscriptions before invoking AI when their product or localization state is locked by a pending App Review
 
 ### Shared Translation Validation

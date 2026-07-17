@@ -531,6 +531,9 @@ def run(cli) -> bool:
 
     # Apply per platform
     print()
+    translated_locales = [
+        loc for loc in target_locales if (translations.get(loc) or "").strip()
+    ]
     for plat, locale_map in per_version_locales.items():
         if plat not in selected_versions:
             continue
@@ -538,7 +541,12 @@ def run(cli) -> bool:
         locales_for_platform = empty_by_platform.get(plat, [])
         filled_for_platform = filled_by_platform.get(plat, [])
         base_needs_update = plat in base_missing_platforms
-        apply_locales = [loc for loc in target_locales if loc in locales_for_platform or (include_existing and loc in filled_for_platform)]
+        apply_locales = [
+            loc
+            for loc in translated_locales
+            if loc in locales_for_platform
+            or (include_existing and loc in filled_for_platform)
+        ]
         base_empty_here = not (locale_map.get(base_locale, {}).get("whatsNew") or "").strip()
         update_base_from_preset = selected_preset is not None and base_locale in locale_map
         should_update_base = base_empty_here or update_base_from_preset
@@ -559,7 +567,7 @@ def run(cli) -> bool:
             def _apply(loc: str) -> bool:
                 asc.update_app_store_version_localization(
                     localization_id=locale_map[loc]["id"],
-                    whats_new=translations.get(loc, ""),
+                    whats_new=translations[loc],
                 )
                 return True
 
@@ -583,7 +591,13 @@ def run(cli) -> bool:
         for plat, locale_map in per_version_locales.items():
             if plat not in selected_versions:
                 continue
-            for loc in [*empty_by_platform.get(plat, []), *([loc for loc in target_locales if include_existing and loc in filled_by_platform.get(plat, [])])]:
+            verify_locales = [
+                loc
+                for loc in translated_locales
+                if loc in empty_by_platform.get(plat, [])
+                or (include_existing and loc in filled_by_platform.get(plat, []))
+            ]
+            for loc in verify_locales:
                 data = asc.get_app_store_version_localization(locale_map[loc]["id"]) or {}
                 wn = (data.get("data", {}).get("attributes", {}).get("whatsNew") or "").strip()
                 if not wn:

@@ -73,3 +73,21 @@ def test_pick_subscriptions_non_tui_invalid_numbers(monkeypatch):
 def test_mode_selector_tui_defaults_to_sub_when_back():
     ui = _TUI(select_value=None)
     assert st._mode_selector(ui) == "sub"
+
+
+def test_require_saved_resource_allows_partial_update_without_name():
+    response = {
+        "data": {
+            "id": "loc1",
+            "attributes": {"name": "Existing name", "description": "Updated"},
+        }
+    }
+
+    assert (
+        st._require_saved_resource(
+            response,
+            {"description": "Updated"},
+            group_scope=False,
+        )
+        == "loc1"
+    )

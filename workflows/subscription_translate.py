@@ -110,7 +110,12 @@ def _require_saved_resource(response, desired: Dict[str, str], *, group_scope: b
     attrs = resource.get("attributes")
     if isinstance(attrs, dict):
         description_field = "customAppName" if group_scope else "description"
-        if attrs.get("name") is not None and attrs.get("name") != desired.get("name"):
+        desired_name = desired.get("name")
+        if (
+            desired_name is not None
+            and attrs.get("name") is not None
+            and attrs.get("name") != desired_name
+        ):
             raise RuntimeError("ASC response did not preserve the submitted display name")
         desired_description = desired.get(description_field)
         if (

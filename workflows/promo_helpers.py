@@ -115,7 +115,11 @@ def apply_promotional_updates(
         if plat not in selected_versions:
             continue
         plat_name = plat_label.get(plat, plat)
-        apply_locales = [loc for loc in target_locales if loc in locale_map]
+        apply_locales = [
+            loc
+            for loc in target_locales
+            if loc in locale_map and (translations.get(loc) or "").strip()
+        ]
         total_to_update = len(apply_locales) + (1 if base_locale in locale_map else 0)
         if total_to_update == 0:
             continue
@@ -143,7 +147,7 @@ def apply_promotional_updates(
             def _apply(loc: str) -> bool:
                 asc.update_app_store_version_localization(
                     localization_id=locale_map[loc]["id"],
-                    promotional_text=translations.get(loc, ""),
+                    promotional_text=translations[loc],
                 )
                 return True
 
@@ -184,7 +188,7 @@ def verify_promotional_updates(
             if promo != expected_base:
                 verify_failures += 1
         for loc in target_locales:
-            if loc not in locale_map:
+            if loc not in locale_map or not (translations.get(loc) or "").strip():
                 continue
             data = asc.get_app_store_version_localization(locale_map[loc]["id"]) or {}
             promo = (data.get("data", {}).get("attributes", {}).get("promotionalText") or "").strip()

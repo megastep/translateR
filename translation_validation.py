@@ -37,12 +37,20 @@ def validate_translation(
             f"{field_label} translation is {len(value)} characters; allowed maximum is {max_length}"
         )
     allowed_controls = {"\n", "\t"} if not single_line else set()
+    allowed_format_chars = {"\u200c", "\u200d"}  # ZWNJ and ZWJ are meaningful in Indic scripts.
     if any(
-        char not in allowed_controls and unicodedata.category(char) in ("Cc", "Cf", "Cs")
+        char not in allowed_controls
+        and (
+            unicodedata.category(char) in ("Cc", "Cs")
+            or (
+                unicodedata.category(char) == "Cf"
+                and char not in allowed_format_chars
+            )
+        )
         for char in value
     ):
         raise ValueError(f"{field_label} translation contains a control or invisible character")
-    if re.search(r"<[^>]+>", value):
+    if re.search(r"</?[a-zA-Z][^>]*>", value):
         raise ValueError(f"{field_label} translation contains markup")
 
 

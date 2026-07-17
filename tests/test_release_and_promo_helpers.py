@@ -2,6 +2,7 @@ import builtins
 
 from release_presets import ReleaseNotePreset
 from workflows import promo, release
+from workflows.promo_helpers import apply_promotional_updates, verify_promotional_updates
 
 
 class DummyUI:
@@ -174,3 +175,53 @@ def test_prompt_source_promotional_text_retries_until_non_empty():
     text, refine = promo._prompt_source_promotional_text(ui, "Base text", "default", "")
     assert text == "Valid promo"
     assert refine == "default"
+
+
+def test_promotional_apply_and_verify_skip_failed_translations():
+    class ASC:
+        def __init__(self):
+            self.updates = []
+            self.reads = []
+
+        def update_app_store_version_localization(self, **kwargs):
+            self.updates.append(kwargs)
+            return {"data": {"id": kwargs["localization_id"]}}
+
+        def get_app_store_version_localization(self, localization_id):
+            self.reads.append(localization_id)
+            text = "Base promo" if localization_id == "loc-en" else "Promo FR"
+            return {"data": {"attributes": {"promotionalText": text}}}
+
+    asc = ASC()
+    locale_map = {
+        "IOS": {
+            "en-US": {"id": "loc-en"},
+            "fr-FR": {"id": "loc-fr"},
+            "de-DE": {"id": "loc-de"},
+        }
+    }
+    translations = {"fr-FR": "Promo FR"}
+
+    apply_promotional_updates(
+        asc,
+        locale_map,
+        {"IOS": {"id": "version"}},
+        {"IOS": "iOS"},
+        "en-US",
+        "Base promo",
+        ["fr-FR", "de-DE"],
+        translations,
+    )
+    failures = verify_promotional_updates(
+        asc,
+        locale_map,
+        {"IOS": {"id": "version"}},
+        "en-US",
+        "Base promo",
+        ["fr-FR", "de-DE"],
+        translations,
+    )
+
+    assert failures == 0
+    assert {update["localization_id"] for update in asc.updates} == {"loc-en", "loc-fr"}
+    assert "loc-de" not in asc.reads

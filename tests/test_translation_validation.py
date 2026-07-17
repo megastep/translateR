@@ -77,3 +77,22 @@ def test_shared_translation_enforces_minimum_and_maximum_lengths():
             "123456", field_label="App name", max_length=5
         )
 
+
+def test_shared_translation_allows_comparisons_and_indic_joiners_but_rejects_markup():
+    validate_translation(
+        "value < 10 and value > 5",
+        field_label="Description",
+        max_length=100,
+    )
+    validate_translation(
+        "മലയാളം\u200dവാചകം",
+        field_label="Description",
+        max_length=100,
+    )
+
+    with pytest.raises(ValueError, match="contains markup"):
+        validate_translation(
+            "Read <strong>this</strong>",
+            field_label="Description",
+            max_length=100,
+        )
