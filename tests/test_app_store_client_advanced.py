@@ -132,6 +132,25 @@ def test_create_subscription_localization_conflict_updates_existing(monkeypatch)
     assert calls["update"] == 1
 
 
+def test_subscription_localization_rejects_values_over_asc_limits(monkeypatch):
+    client = AppStoreConnectClient("kid", "issuer", "pk")
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("request must not be sent")),
+    )
+
+    for name, description, message in (
+        ("N" * 31, "Desc", "name exceeds 30"),
+        ("Name", "D" * 46, "description exceeds 45"),
+    ):
+        try:
+            client.create_subscription_localization("sub1", "fr-FR", name, description)
+            assert False, "expected local validation failure"
+        except ValueError as error:
+            assert message in str(error)
+
+
 def test_create_app_event_localization_conflict_routes_to_update(monkeypatch):
     client = AppStoreConnectClient("kid", "issuer", "pk")
 

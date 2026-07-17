@@ -4,6 +4,7 @@ from typing import Dict, List
 
 import requests
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES,
     parallel_map_locales,
@@ -25,17 +26,15 @@ def generate_promotional_translations(
 
     def _task(loc: str) -> str:
         language = APP_STORE_LOCALES.get(loc, loc)
-        txt = provider.translate(
-            text=source_text,
-            target_language=language,
+        txt = translate_with_validation(
+            provider,
+            source_text,
+            language,
             max_length=limit,
-            is_keywords=False,
             seed=seed,
             refinement=refine_phrase,
+            field_label="Promotional text",
         )
-        txt = (txt or "").strip()
-        if len(txt) > limit:
-            txt = txt[:limit]
         return txt
 
     translations, _errs = parallel_map_locales(
@@ -116,7 +115,11 @@ def apply_promotional_updates(
         if plat not in selected_versions:
             continue
         plat_name = plat_label.get(plat, plat)
-        apply_locales = [loc for loc in target_locales if loc in locale_map]
+        apply_locales = [
+            loc
+            for loc in target_locales
+            if loc in locale_map and (translations.get(loc) or "").strip()
+        ]
         total_to_update = len(apply_locales) + (1 if base_locale in locale_map else 0)
         if total_to_update == 0:
             continue
@@ -144,7 +147,7 @@ def apply_promotional_updates(
             def _apply(loc: str) -> bool:
                 asc.update_app_store_version_localization(
                     localization_id=locale_map[loc]["id"],
-                    promotional_text=translations.get(loc, ""),
+                    promotional_text=translations[loc],
                 )
                 return True
 
@@ -185,7 +188,7 @@ def verify_promotional_updates(
             if promo != expected_base:
                 verify_failures += 1
         for loc in target_locales:
-            if loc not in locale_map:
+            if loc not in locale_map or not (translations.get(loc) or "").strip():
                 continue
             data = asc.get_app_store_version_localization(locale_map[loc]["id"]) or {}
             promo = (data.get("data", {}).get("attributes", {}).get("promotionalText") or "").strip()

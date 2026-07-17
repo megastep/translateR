@@ -6,6 +6,7 @@ Note: App Info is global at the app level (not per platform).
 from typing import Dict
 import time
 
+from translation_validation import translate_with_validation
 from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, format_progress, parallel_map_locales, provider_model_info
 from workflows.helpers import pick_provider, choose_target_locales, pick_locale_scope
 
@@ -101,8 +102,14 @@ def run(cli) -> bool:
     print_info(f"Starting app name & subtitle translation for {len(target_locales)} languages...")
     def _task(loc: str):
         language_name = APP_STORE_LOCALES.get(loc, loc)
-        name_out = provider.translate(base_name, language_name, max_length=get_field_limit("name"), seed=seed, refinement=refine_phrase) if base_name else None
-        subtitle_out = provider.translate(base_subtitle, language_name, max_length=get_field_limit("subtitle"), seed=seed, refinement=refine_phrase) if base_subtitle else None
+        name_out = translate_with_validation(
+            provider, base_name, language_name, max_length=get_field_limit("name"), seed=seed,
+            refinement=refine_phrase, field_label="App name", single_line=True,
+        ) if base_name else None
+        subtitle_out = translate_with_validation(
+            provider, base_subtitle, language_name, max_length=get_field_limit("subtitle"), seed=seed,
+            refinement=refine_phrase, field_label="App subtitle", single_line=True,
+        ) if base_subtitle else None
         time.sleep(1)
         return {"name": name_out, "subtitle": subtitle_out}
 

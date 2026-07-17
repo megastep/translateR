@@ -708,12 +708,22 @@ class AppStoreConnectClient:
         params = {"limit": max(1, min(limit, 200))}
         return self._request("GET", f"v1/subscriptionGroups/{group_id}/subscriptions", params=params)
 
+    def get_subscription(self, subscription_id: str) -> Any:
+        return self._request("GET", f"v1/subscriptions/{subscription_id}")
+
     def get_subscription_localizations(self, subscription_id: str) -> Any:
         return self._request("GET", f"v1/subscriptions/{subscription_id}/subscriptionLocalizations")
 
     def create_subscription_localization(self, subscription_id: str, locale: str,
                                         name: str,
                                         description: Optional[str] = None) -> Any:
+        locale = self._normalize_locale_code(locale)
+        name_limit = get_field_limit("subscription_name") or 30
+        description_limit = get_field_limit("subscription_description") or 45
+        if len(name) > name_limit:
+            raise ValueError(f"Subscription name exceeds {name_limit} characters")
+        if description is not None and len(description) > description_limit:
+            raise ValueError(f"Subscription description exceeds {description_limit} characters")
         data = {
             "data": {
                 "type": "subscriptionLocalizations",
@@ -744,18 +754,22 @@ class AppStoreConnectClient:
                         (l.get("attributes") or {}).get("locale"): l.get("id")
                         for l in locs.get("data", []) if l.get("id")
                     }
-                    loc_id = loc_map.get(locale)
+                    loc_id = self._app_store_version_localization_id_for_locale(loc_map, locale)
                     if loc_id:
                         return self.update_subscription_localization(loc_id, name, description)
                 except Exception:
                     pass
-                # If we reach here and handled conflict, return current localizations
-                return loc_map if 'loc_map' in locals() else None
             raise
 
     def update_subscription_localization(self, localization_id: str,
                                          name: Optional[str] = None,
                                          description: Optional[str] = None) -> Any:
+        name_limit = get_field_limit("subscription_name") or 30
+        description_limit = get_field_limit("subscription_description") or 45
+        if name is not None and len(name) > name_limit:
+            raise ValueError(f"Subscription name exceeds {name_limit} characters")
+        if description is not None and len(description) > description_limit:
+            raise ValueError(f"Subscription description exceeds {description_limit} characters")
         attrs: Dict[str, Any] = {}
         if name is not None:
             attrs["name"] = name

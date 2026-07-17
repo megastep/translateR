@@ -111,6 +111,7 @@ def test_many_wrapper_methods_hit_expected_endpoints(monkeypatch):
     client.get_in_app_purchase_localizations("iap1")
     client.get_subscription_groups("app1")
     client.get_subscriptions_for_group("group1")
+    client.get_subscription("sub1")
     client.get_subscription_localizations("sub1")
     client.get_subscription_group_localizations("group1")
     client.get_app_events("app1")

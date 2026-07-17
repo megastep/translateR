@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import sys
 import textwrap
 
+from translation_validation import translate_with_validation
 from release_presets import list_presets, ReleaseNotePreset
 
 from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source, build_refinement_template, parse_refinement_template
@@ -356,17 +357,15 @@ def run(cli) -> bool:
 
             def _task(loc: str) -> str:
                 language = APP_STORE_LOCALES.get(loc, loc)
-                txt = provider.translate(
-                    text=source_notes,
-                    target_language=language,
+                txt = translate_with_validation(
+                    provider,
+                    source_notes,
+                    language,
                     max_length=limit,
-                    is_keywords=False,
                     seed=seed,
                     refinement=refine_phrase,
+                    field_label="What's New",
                 )
-                txt = (txt or "").strip()
-                if len(txt) > limit:
-                    txt = txt[:limit]
                 return txt
 
             translations, _errs = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=1.0)
@@ -532,6 +531,9 @@ def run(cli) -> bool:
 
     # Apply per platform
     print()
+    translated_locales = [
+        loc for loc in target_locales if (translations.get(loc) or "").strip()
+    ]
     for plat, locale_map in per_version_locales.items():
         if plat not in selected_versions:
             continue
@@ -539,7 +541,12 @@ def run(cli) -> bool:
         locales_for_platform = empty_by_platform.get(plat, [])
         filled_for_platform = filled_by_platform.get(plat, [])
         base_needs_update = plat in base_missing_platforms
-        apply_locales = [loc for loc in target_locales if loc in locales_for_platform or (include_existing and loc in filled_for_platform)]
+        apply_locales = [
+            loc
+            for loc in translated_locales
+            if loc in locales_for_platform
+            or (include_existing and loc in filled_for_platform)
+        ]
         base_empty_here = not (locale_map.get(base_locale, {}).get("whatsNew") or "").strip()
         update_base_from_preset = selected_preset is not None and base_locale in locale_map
         should_update_base = base_empty_here or update_base_from_preset
@@ -560,7 +567,7 @@ def run(cli) -> bool:
             def _apply(loc: str) -> bool:
                 asc.update_app_store_version_localization(
                     localization_id=locale_map[loc]["id"],
-                    whats_new=translations.get(loc, ""),
+                    whats_new=translations[loc],
                 )
                 return True
 
@@ -584,7 +591,13 @@ def run(cli) -> bool:
         for plat, locale_map in per_version_locales.items():
             if plat not in selected_versions:
                 continue
-            for loc in [*empty_by_platform.get(plat, []), *([loc for loc in target_locales if include_existing and loc in filled_by_platform.get(plat, [])])]:
+            verify_locales = [
+                loc
+                for loc in translated_locales
+                if loc in empty_by_platform.get(plat, [])
+                or (include_existing and loc in filled_by_platform.get(plat, []))
+            ]
+            for loc in verify_locales:
                 data = asc.get_app_store_version_localization(locale_map[loc]["id"]) or {}
                 wn = (data.get("data", {}).get("attributes", {}).get("whatsNew") or "").strip()
                 if not wn:

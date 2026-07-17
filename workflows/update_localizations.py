@@ -5,6 +5,7 @@ Update Mode workflow with multi-platform handling.
 from typing import Dict
 import time
 
+from translation_validation import translate_with_validation
 from utils import (
     APP_STORE_LOCALES, detect_base_language, get_field_limit, truncate_keywords,
     print_info, print_warning, print_error, format_progress,
@@ -202,7 +203,17 @@ def run(cli) -> bool:
                 continue
             is_keywords = field == "keywords"
             max_length = get_field_limit(field.replace("_", ""))
-            out = provider.translate(source_content, language_name, max_length=max_length, is_keywords=is_keywords, seed=seed, refinement=refine_phrase)
+            out = translate_with_validation(
+                provider,
+                source_content,
+                language_name,
+                max_length=max_length,
+                is_keywords=is_keywords,
+                seed=seed,
+                refinement=refine_phrase,
+                field_label=field.replace("_", " ").title(),
+                single_line=is_keywords,
+            )
             if is_keywords:
                 out = truncate_keywords(out.strip())
             translated[field] = out

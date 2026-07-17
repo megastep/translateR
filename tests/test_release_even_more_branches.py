@@ -121,3 +121,49 @@ def test_release_run_apply_error_and_verify_warning_paths(fake_cli, fake_ui, fak
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
 
     assert release.run(fake_cli) is True
+
+
+def test_release_run_skips_locale_when_translation_fails(
+    fake_cli, fake_ui, fake_asc, localization_payload, monkeypatch
+):
+    fake_ui.app_id = "app1"
+    fake_ui.select_values.extend(["use", "apply"])
+    fake_ui.checkbox_values.extend([["IOS"], []])
+    fake_ui.confirm_values.append(True)
+
+    fake_asc.set_response("_request", _versions_response())
+    fake_asc.set_response(
+        "get_app_store_version_localizations",
+        {
+            "data": [
+                localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+                localization_payload("fr-FR", loc_id="loc-fr", whatsNew=""),
+                localization_payload("de-DE", loc_id="loc-de", whatsNew=""),
+            ]
+        },
+    )
+    fake_asc.set_response(
+        "update_app_store_version_localization",
+        lambda localization_id=None, **_kwargs: {"data": {"id": localization_id}},
+    )
+    fake_asc.set_response(
+        "get_app_store_version_localization",
+        {"data": {"attributes": {"whatsNew": "Notes FR"}}},
+    )
+
+    def fake_parallel(locales, task, progress_action=None, **_kwargs):
+        if progress_action == "Translated":
+            return {"fr-FR": "Notes FR"}, {"de-DE": ValueError("too long")}
+        return {loc: task(loc) for loc in locales}, {}
+
+    monkeypatch.setattr(release, "parallel_map_locales", fake_parallel)
+    monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
+
+    assert release.run(fake_cli) is True
+    update_calls = [
+        call
+        for call in fake_asc.calls
+        if call[0] == "update_app_store_version_localization"
+    ]
+    assert any(call[2].get("localization_id") == "loc-fr" for call in update_calls)
+    assert not any(call[2].get("localization_id") == "loc-de" for call in update_calls)
