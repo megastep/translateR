@@ -7,6 +7,19 @@ from typing import Optional
 
 MAX_TRANSLATION_ATTEMPTS = 4
 
+_EMOJI_PATTERN = re.compile(
+    r"[\u2600-\u27BF\U0001F000-\U0001FAFF\U0001FC00-\U0001FFFD](?:\uFE0F|\u200D)?"
+)
+
+
+def strip_emoji(value: str) -> tuple[str, bool]:
+    """Remove emoji while preserving meaningful non-emoji joiners."""
+    cleaned, count = _EMOJI_PATTERN.subn("", value or "")
+    if not count:
+        return value or "", False
+    cleaned = re.sub(r" {2,}", " ", cleaned)
+    return clean_translation(cleaned, single_line=False), True
+
 
 def clean_translation(value: str, *, single_line: bool) -> str:
     """Normalize harmless model formatting without truncating translated text."""
@@ -26,6 +39,7 @@ def validate_translation(
     max_length: Optional[int],
     min_length: int = 1,
     single_line: bool = False,
+    forbid_emoji: bool = False,
 ) -> None:
     """Reject empty, malformed, or out-of-range text before it reaches a store API."""
     if len(value) < min_length:
@@ -52,6 +66,8 @@ def validate_translation(
         raise ValueError(f"{field_label} translation contains a control or invisible character")
     if re.search(r"</?[a-zA-Z][^>]*>", value):
         raise ValueError(f"{field_label} translation contains markup")
+    if forbid_emoji and strip_emoji(value)[1]:
+        raise ValueError(f"{field_label} translation contains emoji")
 
 
 def translate_with_validation(
@@ -137,6 +153,7 @@ def translate_with_validation(
                 max_length=max_length,
                 min_length=min_length,
                 single_line=single_line,
+                forbid_emoji=forbid_emoji,
             )
             return translated
         except ValueError as error:

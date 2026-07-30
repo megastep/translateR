@@ -16,6 +16,43 @@ from urllib.parse import urlparse, parse_qs
 from utils import get_field_limit
 
 
+def _asc_error_context(response: requests.Response, limit: int = 1000) -> str:
+    """Summarize an App Store Connect JSON:API error response."""
+    request_id = (
+        response.headers.get("x-request-id")
+        or response.headers.get("request-id")
+        or response.headers.get("X-Request-Id")
+    )
+    try:
+        body = response.json()
+    except Exception:
+        body = getattr(response, "text", "") or ""
+
+    details = []
+    if isinstance(body, dict):
+        for item in (body.get("errors") or [])[:3]:
+            if isinstance(item, dict):
+                source = item.get("source") or {}
+                parts = (
+                    item.get("code"),
+                    item.get("title"),
+                    item.get("detail"),
+                    source.get("pointer") if isinstance(source, dict) else None,
+                )
+                details.append(" | ".join(str(part) for part in parts if part))
+        details = [detail for detail in details if detail]
+        if not details and body:
+            details.append(json.dumps(body, ensure_ascii=False))
+    elif body:
+        details.append(str(body).replace("\n", " ").strip())
+
+    detail = "; ".join(details)[:limit]
+    context = [f"request_id={request_id}"] if request_id else []
+    if detail:
+        context.append(f"detail={detail}")
+    return "; ".join(context)
+
+
 class AppStoreConnectClient:
     """Client for interacting with App Store Connect API."""
     
@@ -88,6 +125,7 @@ class AppStoreConnectClient:
             if len(txt) > limit:
                 return txt[:limit] + "…"
             return txt
+
         if endpoint.startswith("v2/"):
             url = f"https://api.appstoreconnect.apple.com/{endpoint}"
         elif endpoint.startswith("v1/"):
@@ -102,8 +140,10 @@ class AppStoreConnectClient:
                 return response.json()
             except requests.exceptions.HTTPError as e:
                 status = response.status_code
-                if status == 409 and attempt < max_retries:
-                    # Conflict error - retry with exponential backoff
+                if status == 409 and method.upper() == "GET" and attempt < max_retries:
+                    # A read conflict can be transient. Mutation conflicts are
+                    # validation/state errors and retrying the same payload only
+                    # delays and obscures the actionable ASC response.
                     wait_time = (2 ** attempt) + random.uniform(0, 1)
                     print(f"⚠️  API conflict detected for {url} (params={_safe_preview(params)}, data={_safe_preview(data)}), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})...")
                     time.sleep(wait_time)
@@ -141,6 +181,10 @@ class AppStoreConnectClient:
                         if body_excerpt:
                             detail += f", body=\"{body_excerpt}\""
                         print(f"❌ Server error {status} for {url} (params={_safe_preview(params)}, data={_safe_preview(data)}){detail}")
+                    elif 400 <= status <= 499:
+                        context = _asc_error_context(response)
+                        if context:
+                            e.args = (f"{str(e)} — ASC {context}",)
                     raise e
     
     def get_apps(self, limit: int = 200) -> Any:
@@ -240,7 +284,7 @@ class AppStoreConnectClient:
             if code and code.split("-")[0].lower() == root and lid
         ]
         return matches[0] if len(matches) == 1 else ""
-    
+
     def create_app_store_version_localization(self, version_id: str, locale: str,
                                             description: str, keywords: str = None,
                                             promotional_text: str = None,
@@ -297,37 +341,9 @@ class AppStoreConnectClient:
         except requests.exceptions.HTTPError as e:
             status = getattr(e.response, "status_code", None)
             if status == 409:
-                req_id = None
-                try:
-                    req_id = e.response.headers.get("x-request-id") or e.response.headers.get("request-id") or e.response.headers.get("X-Request-Id")
-                except Exception:
-                    req_id = None
-                try:
-                    body = e.response.json()
-                except Exception:
-                    body = getattr(e.response, "text", "") or ""
-                if isinstance(body, dict):
-                    errors = body.get("errors", []) or []
-                    details = []
-                    for item in errors[:3]:
-                        if not isinstance(item, dict):
-                            continue
-                        code = item.get("code")
-                        title = item.get("title")
-                        detail = item.get("detail")
-                        parts = [p for p in (code, title, detail) if p]
-                        if parts:
-                            details.append(" | ".join(parts))
-                    detail_txt = "; ".join(details) if details else json.dumps(body, ensure_ascii=False)[:500]
-                else:
-                    detail_txt = str(body)[:500]
-                if req_id or detail_txt:
-                    extra = []
-                    if req_id:
-                        extra.append(f"request_id={req_id}")
-                    if detail_txt:
-                        extra.append(f"detail={detail_txt}")
-                    print(f"⚠️  App Store version localization create conflict for locale={locale}, version_id={version_id} ({', '.join(extra)})")
+                context = _asc_error_context(e.response, limit=500)
+                if context:
+                    print(f"⚠️  App Store version localization create conflict for locale={locale}, version_id={version_id} ({context})")
                 try:
                     locs = self.get_app_store_version_localizations(version_id)
                     loc_map = {
@@ -369,75 +385,56 @@ class AppStoreConnectClient:
             marketing_url: Marketing URL for the localization
             support_url: Support URL for the localization
         """
-        # First get current localization to check for changes
+        # First get current localization to check for changes. Only the read is
+        # allowed to fall back: a failed PATCH must propagate with Apple's
+        # structured validation detail instead of silently issuing it again.
         try:
             current = self.get_app_store_version_localization(localization_id)
-            current_attrs = current.get("data", {}).get("attributes", {})
-            
-            # Build attributes dict with only changed values
-            attributes = {}
-            
-            if description is not None and description != current_attrs.get("description"):
-                attributes["description"] = description
-            
-            if keywords is not None and keywords != current_attrs.get("keywords"):
-                attributes["keywords"] = keywords
-            
-            if promotional_text is not None and promotional_text != current_attrs.get("promotionalText"):
-                attributes["promotionalText"] = promotional_text
-            
-            if whats_new is not None and whats_new != current_attrs.get("whatsNew"):
-                # Ensure what's new doesn't exceed character limit
-                if len(whats_new) > 4000:
-                    whats_new = whats_new[:3997] + "..."
+        except Exception:
+            current = None
+
+        current_attrs = (
+            current.get("data", {}).get("attributes", {})
+            if isinstance(current, dict)
+            else {}
+        )
+        attributes = {}
+
+        candidates = (
+            ("description", description),
+            ("keywords", keywords),
+            ("promotionalText", promotional_text),
+            ("marketingUrl", marketing_url),
+            ("supportUrl", support_url),
+        )
+        for api_name, value in candidates:
+            if value is not None and (
+                current is None or value != current_attrs.get(api_name)
+            ):
+                attributes[api_name] = value
+
+        if whats_new is not None:
+            if len(whats_new) > 4000:
+                whats_new = whats_new[:3997] + "..."
+            if current is None or whats_new != current_attrs.get("whatsNew"):
                 attributes["whatsNew"] = whats_new
 
-            if marketing_url is not None and marketing_url != current_attrs.get("marketingUrl"):
-                attributes["marketingUrl"] = marketing_url
+        if not attributes:
+            return current
 
-            if support_url is not None and support_url != current_attrs.get("supportUrl"):
-                attributes["supportUrl"] = support_url
-            
-            # Only make request if there are changes
-            if attributes:
-                data = {
-                    "data": {
-                        "type": "appStoreVersionLocalizations",
-                        "id": localization_id,
-                        "attributes": attributes
-                    }
-                }
-                return self._request("PATCH", f"appStoreVersionLocalizations/{localization_id}", data=data)
-            else:
-                return current  # No changes needed
-                
-        except Exception as e:
-            # Fallback to simpler update if getting current localization fails
-            data = {
-                "data": {
-                    "type": "appStoreVersionLocalizations",
-                    "id": localization_id,
-                    "attributes": {}
-                }
+        data = {
+            "data": {
+                "type": "appStoreVersionLocalizations",
+                "id": localization_id,
+                "attributes": attributes,
             }
-            
-            attributes = data["data"]["attributes"]
-            if description is not None:
-                attributes["description"] = description
-            if keywords is not None:
-                attributes["keywords"] = keywords
-            if promotional_text is not None:
-                attributes["promotionalText"] = promotional_text
-            if whats_new is not None:
-                if len(whats_new) > 4000:
-                    whats_new = whats_new[:3997] + "..."
-                attributes["whatsNew"] = whats_new
-            if marketing_url is not None:
-                attributes["marketingUrl"] = marketing_url
-            if support_url is not None:
-                attributes["supportUrl"] = support_url
-            
-            return self._request("PATCH", f"appStoreVersionLocalizations/{localization_id}", data=data)
+        }
+        return self._request(
+            "PATCH",
+            f"appStoreVersionLocalizations/{localization_id}",
+            data=data,
+            max_retries=0,
+        )
     
     def get_app_infos(self, app_id: str) -> Any:
         """Get app infos for an app."""

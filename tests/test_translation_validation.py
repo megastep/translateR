@@ -2,7 +2,11 @@ from collections import deque
 
 import pytest
 
-from translation_validation import translate_with_validation, validate_translation
+from translation_validation import (
+    strip_emoji,
+    translate_with_validation,
+    validate_translation,
+)
 
 
 class SequenceProvider:
@@ -65,6 +69,33 @@ def test_shared_translation_preserves_multiline_content_when_allowed():
     )
 
     assert result == "Line one\nLine two"
+
+
+def test_strip_emoji_removes_sequences_and_preserves_text_joiners():
+    cleaned, removed = strip_emoji(
+        "Ship it 🎉\nReady ✅ © 2026 മലയാളം\u200dവാചകം"
+    )
+
+    assert removed is True
+    assert cleaned == "Ship it\nReady © 2026 മലയാളം\u200dവാചകം"
+
+
+def test_shared_translation_retries_emoji_when_forbidden():
+    provider = SequenceProvider(["Bonne nouvelle 🎉", "Bonne nouvelle"])
+
+    result = translate_with_validation(
+        provider,
+        "Good news",
+        "French",
+        max_length=100,
+        seed=20,
+        field_label="What's New",
+        forbid_emoji=True,
+    )
+
+    assert result == "Bonne nouvelle"
+    assert len(provider.calls) == 2
+    assert "no emoji" in provider.calls[0][2]["refinement"]
 
 
 def test_shared_translation_enforces_minimum_and_maximum_lengths():

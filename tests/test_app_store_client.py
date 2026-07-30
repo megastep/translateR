@@ -1,4 +1,5 @@
 import requests
+import pytest
 
 from app_store_client import AppStoreConnectClient
 
@@ -56,6 +57,40 @@ def test_request_retries_on_409(monkeypatch):
 
     assert out["data"][0]["id"] == "ok"
     assert calls["n"] == 2
+
+
+def test_request_does_not_retry_mutation_409_and_preserves_asc_detail(monkeypatch):
+    calls = {"n": 0}
+    payload = {
+        "errors": [
+            {
+                "code": "ENTITY_ERROR.ATTRIBUTE.INVALID",
+                "title": "The provided entity includes an invalid attribute",
+                "detail": "The value is invalid.",
+                "source": {"pointer": "/data/attributes/whatsNew"},
+            }
+        ]
+    }
+
+    def fake_request(*_args, **_kwargs):
+        calls["n"] += 1
+        return DummyResponse(status_code=409, payload=payload)
+
+    monkeypatch.setattr("app_store_client.jwt.encode", lambda *_a, **_k: "t")
+    monkeypatch.setattr("app_store_client.requests.request", fake_request)
+
+    client = AppStoreConnectClient("kid", "issuer", "pk")
+    with pytest.raises(requests.exceptions.HTTPError) as exc_info:
+        client._request(
+            "PATCH",
+            "appStoreVersionLocalizations/loc-1",
+            data={"data": {"id": "loc-1"}},
+        )
+    assert calls["n"] == 1
+    message = str(exc_info.value)
+    assert "ENTITY_ERROR.ATTRIBUTE.INVALID" in message
+    assert "The value is invalid." in message
+    assert "/data/attributes/whatsNew" in message
 
 
 def test_create_and_update_localization_payload_mapping(monkeypatch):

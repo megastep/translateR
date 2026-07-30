@@ -19,7 +19,14 @@ def _versions_response():
     }
 
 
-def test_release_run_translates_and_applies(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
+def test_release_run_translates_and_applies(
+    fake_cli,
+    fake_asc,
+    fake_ui,
+    localization_payload,
+    monkeypatch,
+    capsys,
+):
     fake_ui.app_id = "app1"
     fake_ui.select_values.extend(["use", "apply"])
     fake_ui.checkbox_values.extend([["IOS"], ["fr-FR"]])
@@ -27,7 +34,7 @@ def test_release_run_translates_and_applies(fake_cli, fake_asc, fake_ui, localiz
 
     locs = {
         "data": [
-            localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes"),
+            localization_payload("en-US", loc_id="loc-en", whatsNew="Base notes 🎉"),
             localization_payload("fr-FR", loc_id="loc-fr", whatsNew=""),
         ]
     }
@@ -43,7 +50,14 @@ def test_release_run_translates_and_applies(fake_cli, fake_asc, fake_ui, localiz
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: "")
 
     assert release.run(fake_cli) is True
-    assert any(call[0] == "update_app_store_version_localization" for call in fake_asc.calls)
+    assert fake_cli.ai_manager.get_provider("fake").calls[-1]["text"] == "Base notes"
+    updates = [
+        call for call in fake_asc.calls
+        if call[0] == "update_app_store_version_localization"
+    ]
+    assert updates
+    assert all("🎉" not in call[2].get("whats_new", "") for call in updates)
+    assert "Removed emoji from the source release notes" in capsys.readouterr().out
 
 
 def test_release_run_reenter_source_then_apply(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
@@ -74,7 +88,14 @@ def test_release_run_reenter_source_then_apply(fake_cli, fake_asc, fake_ui, loca
     assert fake_cli.ai_manager.get_provider("fake").calls[-1]["text"] == "New source notes"
 
 
-def test_release_run_uses_selected_preset_when_base_empty(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):
+def test_release_run_uses_selected_preset_when_base_empty(
+    fake_cli,
+    fake_asc,
+    fake_ui,
+    localization_payload,
+    monkeypatch,
+    capsys,
+):
     fake_ui.app_id = "app1"
     fake_ui.select_values.extend(["preset1", "apply"])
     fake_ui.checkbox_values.extend([["IOS"], ["fr-FR"]])
@@ -97,7 +118,7 @@ def test_release_run_uses_selected_preset_when_base_empty(fake_cli, fake_asc, fa
     preset = ReleaseNotePreset(
         preset_id="preset1",
         name="Preset One",
-        translations={"en-US": "Base preset", "fr-FR": "Bonjour preset"},
+        translations={"en-US": "Base preset 🎉", "fr-FR": "Bonjour preset ✅"},
         path=None,
         built_in=True,
     )
@@ -107,6 +128,14 @@ def test_release_run_uses_selected_preset_when_base_empty(fake_cli, fake_asc, fa
     assert release.run(fake_cli) is True
     updates = [c for c in fake_asc.calls if c[0] == "update_app_store_version_localization"]
     assert updates
+    assert all(
+        "🎉" not in call[2].get("whats_new", "")
+        and "✅" not in call[2].get("whats_new", "")
+        for call in updates
+    )
+    output = capsys.readouterr().out
+    assert "Review the sanitized source in the preview before applying" in output
+    assert "generated or preset What's New text for 1 locale(s) (fr-FR)" in output
 
 
 def test_release_run_preset_also_updates_base_locale_when_base_already_has_notes(fake_cli, fake_asc, fake_ui, localization_payload, monkeypatch):

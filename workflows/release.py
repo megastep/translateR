@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import sys
 import textwrap
 
-from translation_validation import translate_with_validation
+from translation_validation import strip_emoji, translate_with_validation
 from release_presets import list_presets, ReleaseNotePreset
 
 from utils import APP_STORE_LOCALES, get_field_limit, print_info, print_warning, print_success, print_error, parallel_map_locales, show_provider_and_source, build_refinement_template, parse_refinement_template
@@ -338,6 +338,17 @@ def run(cli) -> bool:
     provider = None
 
     while True:
+        source_notes, source_had_emoji = strip_emoji(source_notes)
+        if source_had_emoji:
+            print_warning(
+                "Removed emoji from the source release notes because App Store Connect "
+                "rejects emoji in What's New. Review the sanitized source in the "
+                "preview before applying."
+            )
+        if not source_notes.strip():
+            print_error("Release notes cannot contain only emoji")
+            return True
+
         if selected_preset is None and provider is None and target_locales:
             provider, selected_provider = pick_provider(cli)
             if not provider:
@@ -365,12 +376,27 @@ def run(cli) -> bool:
                     seed=seed,
                     refinement=refine_phrase,
                     field_label="What's New",
+                    forbid_emoji=True,
                 )
                 return txt
 
             translations, _errs = parallel_map_locales(target_locales, _task, progress_action="Translated", pacing_seconds=1.0)
         else:
             translations = {}
+
+        affected_locales = []
+        for locale, value in translations.items():
+            cleaned, removed = strip_emoji(value)
+            if removed:
+                translations[locale] = cleaned
+                affected_locales.append(locale)
+        if affected_locales:
+            print_warning(
+                "Removed emoji from generated or preset What's New text for "
+                f"{len(affected_locales)} locale(s) "
+                f"({', '.join(affected_locales)}). Review the sanitized "
+                "text in the preview before applying."
+            )
 
         # Preview
         preview_locales = list(target_locales)
@@ -502,6 +528,9 @@ def run(cli) -> bool:
                         edited = ui.prompt_multiline(f"Edit release notes for {language} (END with 'EOF'):", initial=translations.get(loc, ""))
                         if edited is not None:
                             edited = edited.strip()
+                            edited, removed_emoji = strip_emoji(edited)
+                            if removed_emoji:
+                                print_warning(f"Removed emoji from edited What's New text for {loc}.")
                             if len(edited) > limit:
                                 edited = edited[:limit]
                             translations[loc] = edited
@@ -513,6 +542,9 @@ def run(cli) -> bool:
                         edited = ui.prompt_multiline(f"Edit release notes for {language} (END with 'EOF'):", initial=translations.get(loc, ""))
                         if edited is not None:
                             edited = edited.strip()
+                            edited, removed_emoji = strip_emoji(edited)
+                            if removed_emoji:
+                                print_warning(f"Removed emoji from edited What's New text for {loc}.")
                             if len(edited) > limit:
                                 edited = edited[:limit]
                             translations[loc] = edited

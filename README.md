@@ -125,6 +125,7 @@ By default the script resolves the latest App Store version for the app ID you p
 - Pull from reusable presets (built-in or custom) for frequently used notes
 - Enter or edit source notes (English) if missing, or reuse base notes
 - Batch-translates all target locales, shows a full preview, lets you edit per-locale, then applies updates per platform
+- Removes emoji from source, generated, preset, and manually edited release notes before sending What's New metadata to App Store Connect
 - If you're not happy with the results, re‑enter the source release notes and re‑translate before applying (available in both TUI and non‑TUI flows)
 - Editing opens your system editor (`$VISUAL`/`$EDITOR`) when available; otherwise a simple inline editor is provided
 - Updates the base locale if it's empty for a chosen platform

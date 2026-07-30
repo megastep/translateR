@@ -103,7 +103,10 @@ def test_update_app_store_version_localization_no_changes_and_fallback(monkeypat
     monkeypatch.setattr(
         client,
         "_request",
-        lambda method, endpoint, params=None, data=None, max_retries=3: seen.append((method, endpoint, data)) or {"data": {"id": "x"}},
+        lambda method, endpoint, params=None, data=None, max_retries=3: seen.append(
+            (method, endpoint, data, max_retries)
+        )
+        or {"data": {"id": "x"}},
     )
 
     same = client.update_app_store_version_localization(
@@ -136,6 +139,7 @@ def test_update_app_store_version_localization_no_changes_and_fallback(monkeypat
     attrs = patch[2]["data"]["attributes"]
     assert attrs["description"] == "new"
     assert attrs["whatsNew"].endswith("...")
+    assert patch[3] == 0
 
 
 def test_app_info_and_copy_localization_paths(monkeypatch):
