@@ -8,7 +8,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "cryptography>=44.0.0",
     "inquirerpy>=0.3.4",
-    "pyjwt>=2.10.0",
+    "pyjwt>=2.15.0",
     "requests>=2.32.0",
 ]
 
